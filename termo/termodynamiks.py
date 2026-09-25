@@ -30,16 +30,20 @@ def k_from_cp(cp, R):
 
 
 #Компрессор
-g_v_pr = 3.3/0.98     # Расход воздуха
+g_v_pr = 4.795     # Приведённый расход воздуха, кг/с (подобран kompressor/podbor.py под 800 л.с. + 5 %)
 sigma_vh = 0.96     # Потери полного давления в воздухозаборнике
-pik = 6     # Степень сжатия ступени центробежного компрессора
-eta_k = 0.82        # Ожидаемый кпд ЦБК
-v_k = 1     # коэффициент для учета отбора воздуха
+pik = 4.5     # Степень сжатия ступени центробежного компрессора (kompressor/podbor.py)
+# КПД компрессора берётся из газодинамического расчёта ЦБК (kompressor/cbk.py). Если ETA_K_IZ_KOMPRESSORA = False,
+# используется оценочное значение eta_k_ocenka
+ETA_K_IZ_KOMPRESSORA = True
+eta_k_ocenka = 0.82        # Оценочный КПД ЦБК
+# Конструктивные параметры ЦБК (в пределах рекомендаций книги, подобраны kompressor/podbor.py)
+KOMP = dict(G_bar=0.559, d_vt=0.5, alpha1=78.606, beta2l=86.065, D3_D2=1.15, D4_D3=1.35, d_alpha4=18.0, z_vna=25)
 v_la = 0.03     # коэффициент отбора воздуха для ЛА
 
 #КС
 sigma_ks = 0.96     # Потери полного давления в КС
-alpha = 3         # Начальное приближение для коэффициента избытка воздуха
+alpha_0 = 3         # Начальное приближение для коэффициента избытка воздуха
 eta_ks = 0.99       # кпд сгорания
 H_u = 4.29e7        # Теплотворная способность топлива
 Km0 = 14.8      # Количество воздуха на 1 кг топлива
@@ -57,61 +61,84 @@ P8_Pamb = 1.03      # Отношение давления на срезе соп
 # Сопло
 sigma_exh = 0.98       # Потери давления в выхлопном тракте после СТ
 
-# Расчет входного устройства
-P1 = P0*sigma_vh
-g_v = g_v_pr*sigma_vh
-T1 = T0
 
-# Расчет компрессора
-T2 = T1 + T1*(pik**((k_v-1)/k_v) -1)/eta_k
-P2 = P1*pik
-L_k = (k_v/(k_v-1))*R_v*T1*(pik**((k_v-1)/k_v) -1)/eta_k
-N_k =L_k*g_v
-v_ks = v_k - v_la       # доля воздуха, поступающая в КС (после отбора на ЛА)
+def cycle(pik=pik, g_v_pr=g_v_pr, eta_k=None, T_g=T_g, komp_params=None):
+    """
+    Термодинамический расчёт цикла ГТД со свободной турбиной.
+    eta_k = None — КПД компрессора из газодинамического расчёта ЦБК (при ETA_K_IZ_KOMPRESSORA = True).
+    Возвращает словарь параметров по сечениям.
+    """
+    # Расчет входного устройства
+    P1 = P0*sigma_vh
+    g_v = g_v_pr*sigma_vh
+    T1 = T0
 
-#КС
-for _ in range(5):
-    qt = (cp_g(T_g, alpha) * T_g - cp_v(T2) * T2) / (H_u * eta_ks + cp_kerosin(T0_keros) * T0_keros - cp_g(T_g, alpha) * T_g)
-    Km = 1 / qt
-    alpha = Km / Km0
-P3 = P2*sigma_ks
-v_k = v_ks*(1+qt)       # относительный расход газа через турбину G_г/G_в (воздух в КС + топливо)
+    # Газодинамический расчёт ЦБК на действительные параметры за воздухозаборником
+    komp = None
+    if eta_k is None:
+        if ETA_K_IZ_KOMPRESSORA:
+            from kompressor.cbk import compressor
+            komp = compressor(pik, g_v, P1, T1, **(KOMP if komp_params is None else komp_params))
+            eta_k = komp["eta_k"]
+        else:
+            eta_k = eta_k_ocenka
 
-#ТВД
-L_tvd = L_k*(1+l_agr)/(eta_mex*v_k)
-g_gas = g_v*v_k
-cp_tvd = cp_g(T_g, alpha)
-k_g = k_from_cp(cp_tvd, R_g)    # k газа, согласованный с cp (используется и в gasdynamiks.py)
-dT4 = L_tvd/cp_tvd
-T4 = T_g-dT4
-pit4 = 1/((1-dT4/(T_g*eta_tvd))**(k_g/(k_g-1)))
-P4 = P3/pit4
+    # Расчет компрессора
+    T2 = T1 + T1*(pik**((k_v-1)/k_v) -1)/eta_k
+    P2 = P1*pik
+    L_k = (k_v/(k_v-1))*R_v*T1*(pik**((k_v-1)/k_v) -1)/eta_k
+    N_k =L_k*g_v
+    v_ks = 1 - v_la       # доля воздуха, поступающая в КС (после отбора на ЛА)
 
-#СТ
-P45 = P4 * sigma_pt
-P5 = (P0 / sigma_exh) * P8_Pamb
-pit5 = P45/P5
-cp_ct = cp_g(T4, alpha)
-k_ct = k_from_cp(cp_ct, R_g)    # k газа в СТ, согласованный с cp
-T5 = T4 * (1.0 - (1.0 - (1.0 / pit5)**((k_ct - 1) / k_ct)) * eta_ct)
-L_ct = cp_ct*T4*(1 - 1/(pit5**((k_ct-1)/k_ct)))*eta_ct*eta_mex_ct
-N_ct = L_ct*v_k*g_v
+    #КС
+    alpha = alpha_0
+    for _ in range(20):
+        qt = (cp_g(T_g, alpha) * T_g - cp_v(T2) * T2) / (H_u * eta_ks + cp_kerosin(T0_keros) * T0_keros - cp_g(T_g, alpha) * T_g)
+        Km = 1 / qt
+        alpha = Km / Km0
+    P3 = P2*sigma_ks
+    v_k = v_ks*(1+qt)       # относительный расход газа через турбину G_г/G_в (воздух в КС + топливо)
+
+    #ТВД
+    L_tvd = L_k*(1+l_agr)/(eta_mex*v_k)
+    g_gas = g_v*v_k
+    cp_tvd = cp_g(T_g, alpha)
+    k_g = k_from_cp(cp_tvd, R_g)    # k газа, согласованный с cp (используется и в gasdynamiks.py)
+    dT4 = L_tvd/cp_tvd
+    T4 = T_g-dT4
+    pit4 = 1/((1-dT4/(T_g*eta_tvd))**(k_g/(k_g-1)))
+    P4 = P3/pit4
+
+    #СТ
+    P45 = P4 * sigma_pt
+    P5 = (P0 / sigma_exh) * P8_Pamb
+    pit5 = P45/P5
+    cp_ct = cp_g(T4, alpha)
+    k_ct = k_from_cp(cp_ct, R_g)    # k газа в СТ, согласованный с cp
+    T5 = T4 * (1.0 - (1.0 - (1.0 / pit5)**((k_ct - 1) / k_ct)) * eta_ct)
+    L_ct = cp_ct*T4*(1 - 1/(pit5**((k_ct-1)/k_ct)))*eta_ct*eta_mex_ct
+    N_ct = L_ct*v_k*g_v
+
+    # Дополнительные расчеты для вывода
+    dT_k = T2 - T1                          # Перепад температур в компрессоре
+    dT_ct = T4 - T5                         # Перепад температур в СТ
+    W_fuel = g_v * v_ks * qt                # Абсолютный расход топлива, кг/с (qt отнесён к воздуху в КС)
+    W_fuel_hour = W_fuel * 3600             # Расход топлива, кг/ч
+    SFC = (W_fuel * 3600) / (N_ct / 1000)   # Удельный расход топлива, кг/(кВт·ч)
+    eta_e = N_ct / (W_fuel * H_u)           # Эффективный КПД двигателя
+    P6 = P5 * sigma_exh                     # Давление в выхлопном тракте
+    P8 = P0 * P8_Pamb                       # Давление на срезе сопла
+    L_tvd_actual = cp_g(T_g, alpha) * dT4   # Действительная удельная работа ТВД
+    return dict(locals())
 
 
-# Вывод результатов расчета
-# =============================================================================
-
-# Дополнительные расчеты для вывода
-dT_k = T2 - T1                          # Перепад температур в компрессоре
-dT4 = T_g - T4                          # Перепад температур в ТВД
-dT_ct = T4 - T5                         # Перепад температур в СТ
-W_fuel = g_v * v_ks * qt                # Абсолютный расход топлива, кг/с (qt отнесён к воздуху в КС)
-W_fuel_hour = W_fuel * 3600             # Расход топлива, кг/ч
-SFC = (W_fuel * 3600) / (N_ct / 1000)   # Удельный расход топлива, кг/(кВт·ч)
-eta_e = N_ct / (W_fuel * H_u)           # Эффективный КПД двигателя
-P6 = P5 * sigma_exh                     # Давление в выхлопном тракте
-P8 = P0 * P8_Pamb                       # Давление на срезе сопла
-L_tvd_actual = cp_g(T_g, alpha) * dT4   # Действительная удельная работа ТВД
+_c = cycle()
+(pik, g_v_pr, T_g, P1, g_v, T1, komp, eta_k, T2, P2, L_k, N_k, v_ks, alpha, qt, P3, v_k, L_tvd, g_gas, cp_tvd, k_g,
+ dT4, T4, pit4, P4, P45, P5, pit5, cp_ct, k_ct, T5, L_ct, N_ct, dT_k, dT_ct, W_fuel, W_fuel_hour, SFC, eta_e, P6, P8,
+ L_tvd_actual) = (_c[_n] for _n in (
+    "pik", "g_v_pr", "T_g", "P1", "g_v", "T1", "komp", "eta_k", "T2", "P2", "L_k", "N_k", "v_ks", "alpha", "qt", "P3",
+    "v_k", "L_tvd", "g_gas", "cp_tvd", "k_g", "dT4", "T4", "pit4", "P4", "P45", "P5", "pit5", "cp_ct", "k_ct", "T5",
+    "L_ct", "N_ct", "dT_k", "dT_ct", "W_fuel", "W_fuel_hour", "SFC", "eta_e", "P6", "P8", "L_tvd_actual"))
 
 if __name__ == "__main__":
     print("=" * 65)
@@ -132,7 +159,8 @@ if __name__ == "__main__":
     print(f"   Удельная работа сжатия (L_k):      {L_k:.2f} Дж/кг  ({L_k/1000:.3f} кДж/кг)")
     print(f"   Мощность компрессора:      {N_k:.2f} Вт")
     print(f"   Степень повышения давления:        π_к = {pik:.1f}")
-    print(f"   Изэнтропный КПД компрессора:       η_к = {eta_k:.3f}")
+    print(f"   Изэнтропный КПД компрессора:       η_к = {eta_k:.3f}"
+          f"  ({'из газодинамического расчёта ЦБК' if komp else 'оценочный'})")
     print(f"   Отбор воздуха (v_la):              {v_la*100:.2f}%")
     print(f"   Доля воздуха в КС (v_кс):          {v_ks:.4f}")
 
