@@ -1,0 +1,14 @@
+# virtual environment files (created by virtualenv), not your code
+Lib/
+Scripts/
+Include/
+include/
+share/
+pyvenv.cfg
+
+# python cache
+__pycache__/
+*.pyc
+
+# PyCharm project settings (optional to ignore)
+.idea/
