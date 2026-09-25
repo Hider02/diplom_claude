@@ -1,14 +1,20 @@
 import math
 from turbine import plot_turb as p
+from turbine import baturin as bt
 from termo.termodynamiks import (R_g, cp_g, alpha, eta_ct, eta_mex_ct, g_gas, T4, P45, P5, P0, T5,
                                  L_ct, N_ct)
+
+# Методика: [1] ЦБК+ОС+ЦБТ, п. 1.4 (с. 31…37) — расчёт на среднем диаметре, как для ТВД (turbine/gasdynamiks.py);
+# [2] Батурин О.В. «Проектирование свободной турбины в составе многокаскадной турбины ГТД» — уточнение φ и ψ
+# по модели потерь ЦИАМ (п. 57…72), число лопаток (п. 49…56), прочность (п. 27…32), расчёт по высоте (п. 79…112).
+HP = 735.499  # 1 л.с. (метрическая), Вт
 
 # ==========================================
 # 1. ИСХОДНЫЕ ДАННЫЕ (из термодинамического расчёта)
 # ==========================================
-# Свободная турбина (СТ) на отдельном валу: частота вращения не связана с ротором турбокомпрессора,
-# выбирается из условия оптимального u/c_ad (далее — через редуктор на нагрузку)
-n_ct = 28000  # Частота вращения ротора СТ, об/мин
+# Свободная турбина (СТ) на отдельном валу: частота вращения не связана с ротором турбокомпрессора
+# и определяется потребителем ([2], п. 35) — принята из условия КПД и прочности, далее редуктор на нагрузку
+n_ct = 26000  # Частота вращения ротора СТ, об/мин
 D_sr = 0.300  # Средний диаметр СТ, м (больше, чем у ТВД 207 мм: объёмный расход выше; переходный канал с подъёмом радиуса)
 
 # Параметры газа на входе в СТ (полные) — сечение 45 термодинамического расчёта
@@ -23,18 +29,36 @@ L_ct_gas = L_ct / eta_mex_ct
 
 # Предварительно принимаемые коэффициенты
 eta_i_guess = eta_ct  # Начальное приближение внутреннего КПД турбины
-phi = 0.98  # Коэффициент скорости соплового аппарата
-psi = 0.96  # Коэффициент скорости рабочего колеса (Шестаков 0,93…0,97; Батурин 0,96…0,97)
-alpha_1_deg = 20.0  # Угол выхода газа из сопел, град
+phi = 0.97  # Коэффициент скорости соплового аппарата (начальное приближение, [2], п. 11: 0,97…0,98)
+psi = 0.96  # Коэффициент скорости рабочего колеса (начальное приближение, [2], п. 19: 0,96…0,97)
+alpha_1_deg = 22.0  # Угол выхода газа из сопел, град
 alpha_1_rad = math.radians(alpha_1_deg)
-rho_st = 0.5  # Степень реактивности
+rho_st = 0.45  # Степень реактивности ([2], п. 2.1.5: для последних ступеней и СТ 0,4…0,55)
 alpha_0_deg = 90  # Угол входа в СА: за ТВД поток практически осевой (alpha_2 ТВД ≈ 90°)
-# Угол beta_2 не задаётся, а находится из уравнения неразрывности (Шестаков, п. 1.4)
+# Угол beta_2 не задаётся, а находится из уравнения неразрывности ([1], с. 35)
 # при высоте лопатки РК l_рк = l_c + (0…2 мм), чтобы канал не сужался по тракту
 dl_rk = 0.001  # Превышение высоты лопатки РК над высотой лопатки СА, м
 
 C_l_CA = 0.85  # Число цвайфеля для СА
 C_l_RK = 0.85  # Число цвайфеля для РК
+
+# Уточнение φ и ψ по модели потерь ЦИАМ ([2], п. 57…72)
+UTOCHNENIE_PHI_PSI = True
+r_kr = 0.4e-3  # Радиус выходной кромки лопаток (неохлаждаемые), м ([2], п. 59: 0,25…1,5 мм)
+T_blade_allow = 1100  # Допустимая температура неохлаждаемой лопатки, К ([2], п. 27)
+T_blade_cooled = 1050  # Температура охлаждаемой лопатки, К ([2], п. 27: 950…1100 К)
+
+# Прочность рабочей лопатки ([2], п. 28…32)
+material = "ЖС6К"  # [2]: для СТ часто ВЖЛ12 (свойства близки к ЖС6)
+rho_mat = 8100  # Плотность материала, кг/м³ ([2], табл. 2.1)
+tau = 1000  # Эквивалентная наработка на взлётном режиме, ч ([2]: 1000 ч для гражданской авиации)
+# Разрушающее напряжение по рис. 2.7 [2]: ЖС6К, T_л = 1050 К, τ = 1000 ч → 450 МПа.
+# Для СТ T_л ≈ 1030 К, т.е. значение взято с запасом
+sigma_dl = 450e6
+F_ratio = 0.4  # Отношение площадей сечения лопатки на периферии и втулке ([2]: 0,25…0,55)
+k_m_min = 1.8  # Минимальный запас прочности ([2], п. 30)
+
+delta_rz = 0.5e-3  # Радиальный зазор РК для оценки потерь по [2], п. 76 (0,3…1 мм)
 # ==========================================
 # 2. ИТЕРАЦИОННЫЙ РАСЧЕТ СВОБОДНОЙ ТУРБИНЫ (1D)
 # ==========================================
@@ -44,7 +68,7 @@ print(f"Потребная работа газа L_ст = {L_ct_gas:.1f} Дж/к
 n_iter = 20
 for iteration in range(n_iter):
     L_tad = L_ct_gas / eta_i_guess
-    print(f"=== Итерация {iteration + 1} (eta_i_guess = {eta_i_guess:.3f}) ===")
+    print(f"=== Итерация {iteration + 1} (eta_i_guess = {eta_i_guess:.3f}, phi = {phi:.4f}, psi = {psi:.4f}) ===")
     print(f"Адиабатный теплоперепад L_tad* = {L_tad:.2f} Дж/кг")
     if L_tad >= cp_prime * T_in:
         raise ValueError("Теплоперепад больше энтальпии торможения на входе — проверьте исходные данные")
@@ -55,11 +79,10 @@ for iteration in range(n_iter):
 
     u_sr = (math.pi * D_sr * n_ct) / 60
     print(f"Средний диаметр D_cp = {D_sr * 1000:.0f} мм, окружная скорость u_cp = {u_sr:.1f} м/с")
-    print(f'Коэффициент нагрузки {L_tad / u_sr ** 2}')
 
     x_1 = u_sr / c_ad
     H = 1 / (x_1 ** 2)
-    print(f"Отношение скоростей x_1 = {x_1:.2f}, Коэффициент напора H = {H:.2f}")
+    print(f"Отношение скоростей x_1 = {x_1:.2f} ([1]: 0,45…0,55), Коэффициент напора H = {H:.2f}")
 
     L_sa = (1 - rho_st) * L_tad
     c_1 = phi * math.sqrt(2 * L_sa)
@@ -74,11 +97,11 @@ for iteration in range(n_iter):
     print(f"Статическая Температура после сопел T_1 = {T_1_stat:.1f} К, Давление p_1 = {P_1_stat:.1f} Па")
 
     l_c = round(g_gas / (math.pi * D_sr * c_1a * rho_1), 3)
-    S_sa = round(l_c / 1.3, 3)  # Осевая ширина СА: (h/S)_са = 1,3
+    S_sa = round(l_c / 1.3, 3)  # Осевая ширина СА: (h/S)_са = 1,3 ([2], п. 42: 1…3 для малорасходных турбин)
 
-    # Параметр Цвайфеля для СА
-    Z_ca_bl = round(2 * math.pi * D_sr * (math.sin(alpha_1_rad) ** 2) * (
-                1 / math.tan(alpha_1_rad) + 1 / math.tan(math.radians(alpha_0_deg))) / (S_sa * C_l_CA))
+    # Число лопаток СА по параметру Цвайфеля — ближайшее простое число ([2], п. 49)
+    Z_ca_bl = bt.prime_blade_number(bt.zweifel_blade_number(D_sr, alpha_0_deg, alpha_1_deg, S_sa, C_l_CA))
+    C_l_CA_fact = bt.zweifel_number(D_sr, alpha_0_deg, alpha_1_deg, S_sa, Z_ca_bl)
 
     t_ca = math.pi * D_sr / Z_ca_bl
     y_sa = round(85.95 - 1.277 * (alpha_0_deg - alpha_1_deg) + 0.0084 * (alpha_0_deg - alpha_1_deg) ** 2)
@@ -86,7 +109,7 @@ for iteration in range(n_iter):
     print(f"t/b {t_ca / b_sa}")
     d_sa = D_sr - l_c
     D_sa = D_sr + l_c
-    print(f"Высота лопаток сопел l_c = {l_c * 1000:.1f} мм, Число лопаток Z_ca ≈ {Z_ca_bl}")
+    print(f"Высота лопаток сопел l_c = {l_c * 1000:.1f} мм, Число лопаток Z_ca = {Z_ca_bl} (C_L = {C_l_CA_fact:.3f})")
 
     L_rk = rho_st * L_tad
     w_1 = math.sqrt(c_1 ** 2 + u_sr ** 2 - 2 * c_1 * u_sr * math.cos(alpha_1_rad))
@@ -128,13 +151,14 @@ for iteration in range(n_iter):
     d_rk = D_sr - l_rk
     D_rk = D_sr + l_rk
 
-    Z_rk_bl = round(2 * math.pi * D_sr * (math.sin(beta_2_rad) ** 2) * (
-            1 / math.tan(beta_2_rad) + 1 / math.tan(beta_1_rad)) / (S_rk * C_l_RK))
+    Z_rk_bl = bt.prime_blade_number(bt.zweifel_blade_number(D_sr, beta_1_deg, beta_2_deg, S_rk, C_l_RK),
+                                    exclude=(Z_ca_bl,))
+    C_l_RK_fact = bt.zweifel_number(D_sr, beta_1_deg, beta_2_deg, S_rk, Z_rk_bl)
     t_rk = math.pi * D_sr / Z_rk_bl
     y_rk = 85.95 - 1.277 * (beta_1_deg - beta_2_deg) + 0.0084 * (beta_1_deg - beta_2_deg) ** 2
     b_rk = S_rk / math.sin(math.radians(y_rk))
     print(f"t/b rk {t_rk / b_rk}")
-    print(f"Число лопаток РК Z_rk ≈ {Z_rk_bl}")
+    print(f"Число лопаток РК Z_rk = {Z_rk_bl} (C_L = {C_l_RK_fact:.3f})")
     print(f"Относительная скорость на входе w_1 = {w_1:.1f} м/с, Угол beta_1 = {beta_1_deg:.1f}°")
     print(f"Относительная скорость на выходе w_2 = {w_2:.1f} м/с, Угол beta_2 = {beta_2_deg:.1f}°")
     print(f"Абсолютная скорость на выходе c_2 = {c_2:.1f} м/с, Угол alpha_2 = {alpha_2_deg:.1f}°")
@@ -156,15 +180,37 @@ for iteration in range(n_iter):
     L_i = L_u - Z_ut - Z_tv
     eta_i = L_i / L_tad
 
+    print(f"Коэффициент нагрузки L_u/u² = {L_u / u_sr ** 2:.2f} ([2]: 1…2,5), "
+          f"коэффициент расхода c_a/u = {c_1a / u_sr:.2f}")
     print(f"Внутренний КПД eta_i = {eta_i:.3f}")
 
+    # Уточнение коэффициентов скорости по модели потерь ЦИАМ ([2], п. 57…72)
+    T2_w = T_2_stat + w_2 ** 2 / (2 * cp_prime)
+    lambda_w2 = w_2 / math.sqrt(2 * k_g * R_g * T2_w / (k_g + 1))
+    Re_ca = c_1 * b_sa * rho_1 / bt.mu_gas(T_1_stat)
+    # В РК определяющая скорость — относительная w2 (в [2], п. 65, напечатано c2)
+    Re_rk = w_2 * b_rk * rho_2 / bt.mu_gas(T_2_stat)
+    phi_new, xi_ca = bt.velocity_coefficient(alpha_0_deg, alpha_1_deg, t_ca, b_sa, l_c, r_kr,
+                                             lambda_c1 / phi, 0.9, Re_ca)
+    psi_new, xi_rk = bt.velocity_coefficient(beta_1_deg, beta_2_deg, t_rk, b_rk, l_rk, r_kr,
+                                             lambda_w2 / psi, 0.8, Re_rk)
+    print(f"Модель потерь ЦИАМ: phi = {phi_new:.4f} (Re = {Re_ca:.2e}, ξ = {xi_ca['Σ']:.4f}), "
+          f"psi = {psi_new:.4f} (Re = {Re_rk:.2e}, ξ = {xi_rk['Σ']:.4f})")
+    if not UTOCHNENIE_PHI_PSI:
+        phi_new, psi_new = phi, psi
+
     error = abs(eta_i - eta_i_guess) / eta_i_guess
-    if error <= 0.005:
-        print(f"\n>>> РАСЧЕТ СХОДИТСЯ! Погрешность {error * 100:.2f}% <= 0,5%.\n")
+    err_phi = abs(phi_new - phi) / phi
+    err_psi = abs(psi_new - psi) / psi
+    if error <= 0.005 and err_phi <= 0.01 and err_psi <= 0.01:
+        print(f"\n>>> РАСЧЕТ СХОДИТСЯ! Погрешность eta_i {error * 100:.2f}% <= 0,5%, "
+              f"phi {err_phi * 100:.2f}%, psi {err_psi * 100:.2f}% <= 1%.\n")
         break
     else:
-        print(f"Погрешность {error * 100:.2f}% > 0,5%. Повторяем расчет...\n")
+        print(f"Погрешность eta_i {error * 100:.2f}%, phi {err_phi * 100:.2f}%, psi {err_psi * 100:.2f}%. "
+              f"Повторяем расчет...\n")
         eta_i_guess = eta_i
+        phi, psi = phi_new, psi_new
 else:
     print(f"⚠️ Расчёт НЕ сошёлся за {n_iter} итераций (погрешность {error * 100:.2f}%)\n")
 
@@ -176,10 +222,10 @@ if w_2 > u_sr:
 
 N_st = L_i * g_gas * eta_mex_ct  # мощность на выходном валу СТ
 print("--- ИТОГОВЫЕ РЕЗУЛЬТАТЫ ---")
-print(f"Мощность СТ на валу N_ст = {N_st / 1000:.1f} кВт = {N_st / 1000 * 1.36:.1f} л.с. (eta_мех_ст = {eta_mex_ct})")
-print(f"Мощность по термодинамике N_ст = {N_ct / 1000:.1f} кВт = {N_ct / 1000 * 1.36:.1f} л.с.")
+print(f"Мощность СТ на валу N_ст = {N_st / 1000:.1f} кВт = {N_st / HP:.1f} л.с. (eta_мех_ст = {eta_mex_ct})")
+print(f"Мощность по термодинамике N_ст = {N_ct / 1000:.1f} кВт = {N_ct / HP:.1f} л.с.")
 print(f"Отличие: {abs(N_st - N_ct) / N_ct * 100:.2f}%")
-if N_st / 1000 * 1.36 < 800:
+if N_st / HP < 800:
     print("⚠️ Мощность меньше заданных 800 л.с.!")
 
 # Сопоставление с термодинамикой.
@@ -199,21 +245,24 @@ if P_2_full < P5:
 if P2_stat < P0:
     print(f"   Статическое давление за СТ ниже атмосферного ({P0 / 1000:.1f} кПа) — нужен выходной диффузор")
 
+# Потери в радиальном зазоре и на трение диска по [2] (п. 76, 77) — для сравнения с [1]
+d_eta_rz = bt.d_eta_tip_clearance(delta_rz, l_rk, D_sr, beta_2_rad, t_rk, b_rk)
+d_eta_d = bt.d_eta_disk(g_gas, L_tad, d_rk, u_sr * d_rk / D_sr, (rho_1 + rho_2) / 2)
+print(f"Потери в радиальном зазоре: [1] Z_ут/L = {Z_ut / L_tad * 100:.2f}%, "
+      f"[2] п. 76 при δ = {delta_rz * 1000:.1f} мм — {d_eta_rz * 100:.2f}%")
+print(f"Потери на трение диска:     [1] Z_тв/L = {Z_tv / L_tad * 100:.2f}%, [2] п. 77 — {d_eta_d * 100:.2f}%")
+
 # Числа Маха
 M_c1 = c_1 / math.sqrt(k_g * R_g * T_1_stat)
 M_c2 = c_2 / math.sqrt(k_g * R_g * T_2_stat)
-T2_w = T_2_stat + w_2 ** 2 / (2 * cp_prime)
-a_cr_w2 = math.sqrt(2 * k_g * R_g * T2_w / (k_g + 1))
-lambda_w2 = w_2 / a_cr_w2
 print(f"M_c1 = {M_c1:.3f}, M_c2 = {M_c2:.3f}, lambda_w2 = {lambda_w2:.3f}")
 if M_c1 > 0.95 or M_c2 > 0.95 or lambda_w2 > 0.95:
     print("⚠️ ВНИМАНИЕ: скорость близка к звуковой!")
 
-# Прочность: напряжение растяжения в корне лопатки РК (без бандажа, коэф. формы 0,55 для сужающейся лопатки)
-rho_mat = 8200  # Плотность материала лопатки (жаропрочный никелевый сплав), кг/м³
-F_ann = math.pi * D_sr * l_rk  # Ометаемая площадь РК, м²
-sigma_p = 0.55 * rho_mat * (math.pi * n_ct / 30) ** 2 * F_ann / (2 * math.pi)
-print(f"Напряжение растяжения в корне лопатки РК sigma_p ≈ {sigma_p / 1e6:.0f} МПа")
+# Температура и прочность рабочей лопатки ([2], п. 27…32)
+T_blade = bt.blade_temperature(T1_w, T_blade_allow, T_blade_cooled)
+k_m = bt.print_strength_check("СТ", T1_w, T_blade, T_blade_allow, tau, material, rho_mat, sigma_dl,
+                              bt.form_factor(F_ratio), u_sr, D_sr / l_rk, k_m_min)
 
 # ==========================================
 # 3. РАСЧЕТ ПО ВЫСОТЕ ПРОТОЧНОЙ ЧАСТИ (МЕТОДИКА БАТУРИНА О.В.)
