@@ -1,248 +1,334 @@
 """
-Газодинамический расчёт центробежного компрессора (ЦБК) с безлопаточным (БЛД) и лопаточным (ЛД) диффузорами.
-Методика: «Осевые и центробежные компрессоры двигателей летательных аппаратов», разд. 6.10 (с. 150…165);
-μ и типы лопаток — разд. 6.5, 6.6 (с. 135, 141); углы атаки ВНА — разд. 6.11 (с. 165, 166).
-Номера пунктов (п. N) — по разд. 6.10.
+Газодинамический расчёт центробежного компрессора (ЦБК) по средней линии тока:
+осевой вход без входного направляющего аппарата → рабочее колесо (РК) с загнутыми назад лопатками →
+радиальный безлопаточный диффузор (БЛД) → переходное колено (поворот потока из радиального направления в осевое) →
+осевой лопаточный диффузор (ЛД, спрямляющие венцы) → камера сгорания.
 
-ВНА здесь — вращающийся направляющий аппарат (входная осевая часть рабочего колеса).
-Углы β отсчитываются от окружного направления (фронта решётки), α — тоже от окружного направления.
+Источники:
+[К]  «Осевые и центробежные компрессоры двигателей летательных аппаратов», разд. 6.10 (с. 150…165) —
+     последовательность расчёта, расчёт входа по сечениям, рекомендуемые диапазоны параметров.
+[Oh] Oh H.W., Yoon E.S., Chung M.K. An optimum set of loss models for performance prediction of centrifugal
+     compressors. Proc. IMechE, Part A, 1997, 211, 331–338 — набор моделей потерь РК:
+     скольжение — Wiesner (1967); нагрузка лопаток — Coppage (1956); трение и зазор — Jansen (1967);
+     смешение — Johnston & Dean (1966); трение диска — Daily & Nece (1960); рециркуляция — Oh (1997);
+     утечки — Aungier (1995); удар (incidence) — Conrad (1980). Сводка формул: Gong X., Chen R. Total pressure loss
+     mechanism of centrifugal compressors. Mechanical Engineering Research, 2014, 4(2), 45–59.
+[L]  Lieblein S. Loss and stall analysis of compressor cascades. ASME J. Basic Eng., 1959 (NASA SP-36) —
+     эквивалентный диффузорный фактор и толщина потери импульса для венцов осевого ЛД.
+
+Углы: β — от окружного направления (как в [К]); α2 и углы в осевом ЛД — см. комментарии у формул.
 """
 import math
-from kompressor.gdf import k, R, cp, s_v, a_cr, gdf_pi, gdf_tau, gdf_eps, lambda_from_q
+from kompressor.gdf import k, R, cp, s_v, a_cr, gdf_pi, gdf_tau, lambda_from_q
 
-# Параметры, выбираемые в рекомендуемых книгой пределах
 DEFAULTS = dict(
-    G_bar=0.60,  # Коэффициент производительности Ḡк (п. 2: 0,5…0,7)
-    k_G=0.95,  # Неравномерность поля скоростей на входе (п. 3: 0,93…0,98)
-    H_bar0=0.70,  # Начальное приближение коэффициента адиабатического напора H̄ (п. 4: 0,65…0,75
-                  # для радиальных лопаток); уточняется из условия π*_расч = π*_задан (с. 164, п. 7)
-    d_vt=0.50,  # Относительный диаметр втулки D_вт/D1 (п. 7: 0,5…0,7)
-    alpha1=90.0,  # Угол закрутки потока на входе в ВНА, град (п. 8: 90° — без закрутки)
-    m_zakr=0.0,  # Показатель закона закрутки по радиусу ВНА (с. 155: −1 ≤ m ≤ 1)
-    psi_zakr=1.0,  # Коэффициент неравномерности ψ в формуле затраченной работы (с. 157)
-    xi1=0.25,  # Коэффициент потерь в ВНА ξ1 (п. 11: 0,2…0,3)
-    xi2=0.125,  # Коэффициент потерь в рабочем колесе ξ2 (п. 11: 0,1…0,15)
-    sigma_in=1.0,  # δ_вх входного патрубка (потери воздухозаборника уже учтены в термодинамике)
-    z_vna=21,  # Число лопаток ВНА = числу лопаток РК (с. 156, п. 11: 19…25)
-    b_t_mean=1.4,  # Густота решётки ВНА на среднем радиусе (с. 156, п. 13: 1,3…1,5)
-    i_tip=0.0,  # Угол атаки ВНА на периферии, град (с. 166: 0)
-    i_hub=2.5,  # Угол атаки ВНА у корня, град (с. 166: 2…3°)
-    beta2l=90.0,  # Лопаточный угол на выходе из РК, град (90° — радиальные лопатки; с. 136: 50…90°)
-    alpha_end0=0.06,  # Коэффициент концевых потерь α (с. 157: 0,04…0,08 для одностороннего колеса)
-    beta_fr=0.85e-3,  # β в формуле проверки α (с. 159, п. 11: (0,7…1,0)·10⁻³)
-    D3_D2=1.10,  # Наружный диаметр БЛД (с. 159: D3 = (1,05…1,15)·D2)
-    n_bld=1.55,  # Показатель политропы в БЛД (с. 160: 1,5…1,6)
-    D4_D3=1.30,  # Диаметр выхода ЛД (с. 161: D4 = (1,25…1,35)·D3)
-    d_alpha4=15.0,  # Угол расширения потока в ЛД α4 − α3, град (с. 161: 12…18°)
-    theta_ld=9.0,  # Средний угол расширения каналов ЛД, град (с. 161: ≤ 8…11°)
-    c_k=120.0,  # Скорость на выходе из выходного устройства, м/с (с. 163: 100…140)
-    xi_vu=0.5,  # Коэффициент потерь выходного устройства (с. 163)
-    n_sections=5,  # Число расчётных сечений по высоте ВНА
-    S_D2=0.22,  # Осевая ширина колеса S/D2 (только для рисунка)
+    n_rpm=40000,  # Частота вращения, об/мин
+    nu_hub=0.40,  # Относительный диаметр втулки на входе D1вт/D1к
+    k_D1=1.00,  # D1к / D1к_опт (оптимум — минимум w1 на периферии)
+    k_G=0.97,  # Коэффициент загромождения входа ([К]: 0,93…0,98)
+    beta2l=55.0,  # Лопаточный угол на выходе, град от окружного направления (загнуты назад на 90° − β2л)
+    z_main=13,  # Число основных лопаток
+    z_split=13,  # Число промежуточных (укороченных) лопаток
+    split_weight=0.5,  # Вклад промежуточной лопатки в эффективное число лопаток
+    cr_ratio=0.85,  # c2r / c1a,ср — отношение меридиональных скоростей (задаёт b2)
+    i_tip=0.0, i_hub=2.5,  # Углы атаки на входе, град ([К], с. 166: 0 на периферии, 2…3° у втулки)
+    Lz_D2=0.30,  # Осевая длина колеса L_z/D2 (для длины канала в модели трения Jansen)
+    eps_tip=0.30e-3,  # Радиальный зазор, м
+    Cf=0.005,  # Коэффициент трения в каналах РК [Oh]
+    f_inc=0.6,  # Коэффициент потерь на удар (Conrad: 0,5…0,7)
+    eps_wake=0.15,  # Относительная ширина следа (Johnston & Dean)
+    # БЛД
+    D3_D2=1.12,  # Наружный диаметр радиального БЛД
+    b3_b2=0.90,  # Сужение канала БЛД (b3/b2 ≤ 1 стабилизирует поток)
+    cf_vd=0.006,  # Коэффициент трения стенок в БЛД и колене
+    # Переходное колено (радиальное → осевое)
+    Rb_b3=2.0,  # Радиус средней линии колена / ширина канала
+    AR_bend=1.10,  # Отношение площадей выход/вход колена
+    zeta_bend=0.10,  # Коэффициент потерь от кривизны (по меридиональному скоростному напору)
+    # Осевой ЛД
+    n_rows=4,  # Число спрямляющих венцов (закрутку 55…65° один венец без срыва не снимает)
+    sigma_ld=1.8,  # Густота решётки b/t
+    alpha_out=0.0,  # Угол выхода из ЛД от оси, град
+    AR_ld=1.0,  # Расширение кольцевого канала ЛД (площадь выход/вход)
+    n_sections=5,
 )
 
 
-def _coprime_blade_number(z_raw, z_rk, z_min=9, z_max=25):
-    """Ближайшее к z_raw число лопаток ЛД в диапазоне 9…25, не кратное числу лопаток РК (с. 161)"""
-    z0 = min(max(round(z_raw), z_min), z_max)
-    for d in range(0, z_max):
-        for z in (z0 + d, z0 - d):
-            if z_min <= z <= z_max and math.gcd(z, z_rk) == 1:
-                return z
-    return z0
+def _wiesner(beta2l_deg, z_eff, D1t_D2):
+    """Коэффициент скольжения Wiesner с поправкой на D1/D2"""
+    sb = math.sin(math.radians(beta2l_deg))  # cos угла, отсчитанного от радиуса
+    sigma = 1 - math.sqrt(sb) / z_eff ** 0.7
+    eps_lim = math.exp(-8.16 * sb / z_eff)
+    if D1t_D2 > eps_lim:
+        sigma *= 1 - ((D1t_D2 - eps_lim) / (1 - eps_lim)) ** 3
+    return sigma
 
 
-def _stage(pik, G, p_n, T_n, H_bar, p):
-    """Однократный расчёт ступени при заданном H̄ (разд. 6.10)"""
-    res = {"H_bar": H_bar}
-    # ---------- Определение основных параметров ----------
-    H = cp * T_n * (pik ** ((k - 1) / k) - 1)  # п. 1
-    D1 = math.sqrt(4 * G * math.sqrt(T_n) / (math.pi * s_v * p_n * p["G_bar"] * p["k_G"]))  # п. 3
-    u2 = math.sqrt(H / H_bar)  # п. 5
-    a1 = math.radians(p["alpha1"])
-    d = p["d_vt"]
-    q1 = p["G_bar"] / ((1 - d ** 2) * math.sin(a1))  # п. 8
-    lam1 = lambda_from_q(q1)  # п. 9
-    c1 = lam1 * a_cr(T_n)  # п. 10
-    ctg1 = math.cos(a1) / math.sin(a1)
-    k_alpha = (2 / (k + 1)) ** (1 / (k - 1)) * (
-        math.sqrt((ctg1 / 2) ** 2 + 2 * (1 + ctg1 ** 2 + p["xi2"] / p["xi1"])) - ctg1 / 2)  # п. 11
-    lam_u2 = u2 / a_cr(T_n)
-    D1_D2 = k_alpha * p["G_bar"] / (lam_u2 * gdf_eps(lam1) * (1 - d ** 2))  # п. 11
-    D2 = D1 / D1_D2  # п. 12
-    D_vt = D1 * d  # п. 13
-    u1 = u2 * D1_D2  # п. 14
-    n_rps = u1 / (math.pi * D1)  # п. 15
-    c1a, c1u = c1 * math.sin(a1), c1 * math.cos(a1)
-    w1 = math.sqrt(c1 ** 2 + u1 ** 2 - 2 * c1 * u1 * math.cos(a1))  # п. 16 (периферия)
-    T1 = T_n - c1 ** 2 / (2 * cp)  # п. 17
-    M_w1 = w1 / math.sqrt(k * R * T1)  # п. 18
-    c1a_bar = c1a / u2  # п. 19
-    res.update(H=H, D1=D1, u2=u2, lam1=lam1, c1=c1, k_alpha=k_alpha, D1_D2=D1_D2, D2=D2, D_vt=D_vt, u1=u1,
-               n_rpm=n_rps * 60, c1a=c1a, c1u=c1u, w1=w1, T1=T1, M_w1=M_w1, c1a_bar=c1a_bar)
+def _static(T0, p0, c):
+    T = T0 - c ** 2 / (2 * cp)
+    return T, p0 * (T / T0) ** (k / (k - 1))
 
-    # ---------- Входной патрубок и ВНА: параметры по высоте (с. 154…156) ----------
-    p1_star = p["sigma_in"] * p_n
-    T1_star = T_n
-    t_mean = math.pi * (D1 + D_vt) / 2 / p["z_vna"]
-    chord = p["b_t_mean"] * t_mean  # хорда ВНА постоянна по высоте (п. 13, 14)
 
-    def inlet_section(D_i):
-        Dbar = D_i / D1
-        if abs(p["alpha1"] - 90.0) < 1e-9:
-            a1i, c1ai, c1ui = math.pi / 2, c1a, 0.0
+def _inlet(G, p01, T01, D1t, D1h, kG):
+    """Скорость на входе без закрутки по уравнению расхода (газодинамическая функция q(λ))"""
+    A1 = math.pi / 4 * (D1t ** 2 - D1h ** 2)
+    lam = lambda_from_q(G * math.sqrt(T01) / (s_v * p01 * A1 * kG))
+    return lam * a_cr(T01)
+
+
+def _optimal_D1t(G, p01, T01, n, nu, kG):
+    """D1к, минимизирующий относительную скорость на периферии (метод золотого сечения)"""
+    def w1t(D):
+        try:
+            c = _inlet(G, p01, T01, D, nu * D, kG)
+        except ValueError:
+            return 1e9
+        return math.hypot(c, math.pi * D * n / 60)
+    a, b = 0.03, 0.6
+    g = (math.sqrt(5) - 1) / 2
+    for _ in range(80):
+        c1, c2 = b - g * (b - a), a + g * (b - a)
+        if w1t(c1) < w1t(c2):
+            b = c2
         else:
-            a1i = math.atan(Dbar ** p["m_zakr"] * math.tan(a1))
-            c1ai = c1 * math.sin(a1) / Dbar ** ((1 - p["m_zakr"]) * math.cos(a1) ** 2)
-            c1ui = c1ai / math.tan(a1i)
-        u1i = u1 * Dbar
-        c1i = c1ai / math.sin(a1i)
-        lam_i = c1i / a_cr(T1_star)
-        p1i, T1i = p1_star * gdf_pi(lam_i), T1_star * gdf_tau(lam_i)
-        w1i = math.hypot(c1ai, u1i - c1ui)
-        return dict(D=D_i, u=u1i, c=c1i, ca=c1ai, cu=c1ui, alpha=math.degrees(a1i), lam=lam_i, p=p1i, T=T1i,
-                    rho=p1i / (R * T1i), w=w1i, beta=math.degrees(math.atan2(c1ai, u1i - c1ui)),
-                    M_w=w1i / math.sqrt(k * R * T1i))
+            a = c1
+    return (a + b) / 2
 
+
+def _friction_march(state, L, geom, cf, G, steps=200):
+    """
+    Течение с закруткой в безлопаточном канале с трением о стенки (БЛД, колено).
+    geom(s) → (r, b): радиус и ширина канала по длине средней линии s.
+    Уравнения: момент количества движения d(r·cu)/ds = −cf·c·cu·r/(b·cm);
+    диссипация dq = cf·c³/(b·cm)·ds; ds_энтропии = dq/T; p0 = p0·exp(−Δs/R); T0 = const.
+    """
+    T0, p0, rcu = state["T0"], state["p0"], state["r"] * state["cu"]
+    r, b = geom(0.0)
+    cm = state["cm"]
+    ds_len = L / steps
+    for j in range(steps):
+        s = (j + 1) * ds_len
+        r, b = geom(s)
+        cu = rcu / r
+        for _ in range(30):  # плотность и cm из уравнения расхода
+            c = math.hypot(cu, cm)
+            T, p = _static(T0, p0, c)
+            cm_new = G / (p / (R * T) * 2 * math.pi * r * b)
+            if abs(cm_new - cm) < 1e-6:
+                break
+            cm = cm_new
+        c = math.hypot(cu, cm)
+        dq = cf * c ** 3 / (b * cm) * ds_len
+        rcu -= cf * c * cu * r / (b * cm) * ds_len
+        p0 *= math.exp(-dq / (T * R))
+    cu = rcu / r
+    c = math.hypot(cu, cm)
+    T, p = _static(T0, p0, c)
+    return dict(T0=T0, p0=p0, r=r, b=b, cu=cu, cm=cm, c=c, T=T, p=p, rho=p / (R * T))
+
+
+def _stage(pik_target, G, p01, T01, u2, p):
+    res = {}
+    n = p["n_rpm"]
+    # ---------------- Вход (станция 1) ----------------
+    D1t = p["k_D1"] * _optimal_D1t(G, p01, T01, n, p["nu_hub"], p["k_G"])
+    D1h = p["nu_hub"] * D1t
+    c1a = _inlet(G, p01, T01, D1t, D1h, p["k_G"])
+    T1, p1 = _static(T01, p01, c1a)
+    rho1 = p1 / (R * T1)
+    D1m = math.sqrt((D1t ** 2 + D1h ** 2) / 2)  # среднеквадратичный диаметр
     sections = []
-    n_sec = p["n_sections"]
-    for j in range(n_sec):
-        h_rel = j / (n_sec - 1)
-        s = inlet_section(D_vt + (D1 - D_vt) * h_rel)
-        s["h_rel"] = h_rel
-        s["i"] = p["i_hub"] + (p["i_tip"] - p["i_hub"]) * h_rel  # с. 166: 2…3° у корня, 0 на периферии
-        s["beta_l"] = s["beta"] + s["i"]
-        s["theta"] = 90 - s["beta_l"]  # угол изгиба профиля ВНА (с. 165)
-        s["t"] = math.pi * s["D"] / p["z_vna"]
-        s["b_t"] = chord / s["t"]
-        s["R_ml"] = chord / (2 * math.sin(math.radians(s["theta"]) / 2)) if s["theta"] > 0 else float("inf")
-        sections.append(s)
-    sr = inlet_section((D1 + D_vt) / 2)  # средний радиус входа
-    res.update(sections=sections, sr=sr, chord_vna=chord, p1_star=p1_star)
+    for j in range(p["n_sections"]):
+        h = j / (p["n_sections"] - 1)
+        D = D1h + (D1t - D1h) * h
+        u = math.pi * D * n / 60
+        w = math.hypot(c1a, u)
+        beta = math.degrees(math.atan2(c1a, u))
+        i = p["i_hub"] + (p["i_tip"] - p["i_hub"]) * h
+        sections.append(dict(h_rel=h, D=D, u=u, ca=c1a, cu=0.0, alpha=90.0, w=w, beta=beta, i=i, beta_l=beta + i,
+                             M_w=w / math.sqrt(k * R * T1)))
+    u1t, u1h, u1m = (math.pi * d * n / 60 for d in (D1t, D1h, D1m))
+    w1t, w1h, w1m = (math.hypot(c1a, u) for u in (u1t, u1h, u1m))
+    beta1m = math.degrees(math.atan2(c1a, u1m))
+    res.update(D1t=D1t, D1h=D1h, D1m=D1m, c1a=c1a, T1=T1, p1=p1, rho1=rho1, u1t=u1t, w1t=w1t, w1h=w1h, w1m=w1m,
+               M_w1t=w1t / math.sqrt(k * R * T1), M_c1=c1a / math.sqrt(k * R * T1), sections=sections,
+               beta1m=beta1m)
 
-    # ---------- Рабочее колесо (с. 157…159) ----------
-    z_min = 2 * math.pi * u2 / sr["ca"]  # п. 1
-    z = max(p["z_vna"], math.ceil(z_min))
+    # ---------------- Рабочее колесо (станция 2) ----------------
+    D2 = 60 * u2 / (math.pi * n)
+    z_eff = p["z_main"] + p["split_weight"] * p["z_split"]
+    z_all = p["z_main"] + p["z_split"]
+    sigma = _wiesner(p["beta2l"], z_eff, D1t / D2)
+    c2r = p["cr_ratio"] * c1a
     b2l = math.radians(p["beta2l"])
-    x = 0.6 * (1 + math.sin(b2l))
-    mu = 1 / (1 + 2 * x / z / (1 - D1_D2 ** 2))  # п. 2
-    c2r = sr["ca"]  # с. 157: c2r ≈ c1a,ср
-    c2u = mu * (u2 - c2r / math.tan(b2l))  # п. 4; μ = c2u/c2u∞, c2u∞ = u2 − c2r·ctg β2л (с. 135, 141)
-    alpha_end = p["alpha_end0"]
-    for _ in range(50):
-        H_z = u2 * c2u + alpha_end * u2 ** 2 - p["psi_zakr"] * c1u * u2 * D1_D2 ** 2  # п. 3
-        c2 = math.hypot(c2r, c2u)  # п. 5
-        T2 = sr["T"] + (sr["c"] ** 2 - c2 ** 2) / (2 * cp) + H_z / cp  # п. 6
-        # п. 7; w1, c1a — на среднем радиусе входа, как и остальные параметры «ср» в расчёте РК (с. 158)
-        sum_HR = alpha_end * u2 ** 2 + p["xi1"] * sr["w"] ** 2 / 2 + p["xi2"] * sr["ca"] ** 2 / 2
-        dE_z = H_z - (c2 ** 2 - sr["c"] ** 2) / 2
-        if T2 <= sr["T"] or dE_z <= sum_HR:
-            raise ValueError("РК не сжимает воздух при данных параметрах")
-        nk = k / (k - 1) * (1 - sum_HR / dE_z)  # n/(n−1)
-        p2 = sr["p"] * (T2 / sr["T"]) ** nk  # п. 8
-        rho2 = p2 / (R * T2)
-        b2 = G / (math.pi * rho2 * D2 * c2r)  # п. 10
-        alpha_new = p["beta_fr"] / (c1a_bar * b2 / D2)  # п. 11
-        if abs(alpha_new - alpha_end) < 1e-5:
+    c2u = sigma * u2 - c2r / math.tan(b2l)
+    dh_euler = u2 * c2u  # c1u = 0
+    c2 = math.hypot(c2r, c2u)
+    w2 = math.hypot(c2r, u2 - c2u)
+    alpha2_rad = math.atan2(c2u, c2r)  # от радиального направления (для моделей потерь)
+    # Нагрузка на лопатку (Coppage)
+    Df = 1 - w2 / w1t + 0.75 * (dh_euler / u2 ** 2) / (
+        (w1t / w2) * ((z_all / math.pi) * (1 - D1t / D2) + 2 * D1t / D2))
+    dh_bl = 0.05 * Df ** 2 * u2 ** 2
+    # Удар (Conrad): составляющая относительной скорости, теряемая при рассогласовании угла на среднем диаметре
+    i_m = (p["i_hub"] + p["i_tip"]) / 2
+    dh_inc = p["f_inc"] * (w1m * math.sin(math.radians(i_m))) ** 2 / 2
+    # Трение (Jansen): углы от меридионального направления
+    b1m = math.radians(90 - beta1m)
+    b2m = math.radians(90 - p["beta2l"])
+    # b2 — из уравнения расхода; плотность ρ2 уточняется итерациями
+    rho2 = rho1 * 2.0
+    for _ in range(30):
+        b2 = G / (rho2 * math.pi * D2 * c2r)
+        D_hyd = D2 * (math.cos(b2m) / (z_all / math.pi + D2 * math.cos(b2m) / b2)
+                      + 0.5 * (D1t / D2 + D1h / D2) * math.cos(b1m) /
+                      (z_all / math.pi + (D1t + D1h) / (D1t - D1h) * math.cos(b1m)))
+        L_b = math.pi / 8 * (D2 - (D1t + D1h) / 2 - b2 + 2 * p["Lz_D2"] * D2) * 2 / (math.cos(b1m) + math.cos(b2m))
+        W_mean = (c1a + c2 + w1t + 2 * w1h + 3 * w2) / 8
+        dh_sf = 2 * p["Cf"] * L_b / D_hyd * W_mean ** 2
+        # Зазор (Jansen)
+        r1t, r1h, r2 = D1t / 2, D1h / 2, D2 / 2
+        dh_cl = 0.6 * p["eps_tip"] / b2 * c2u * math.sqrt(
+            4 * math.pi / (b2 * z_all) * (r1t ** 2 - r1h ** 2) / ((r2 - r1t) * (1 + rho2 / rho1)) * c2u * c1a)
+        # Смешение за колесом (Johnston & Dean), b* = b3/b2
+        b_star = p["b3_b2"]
+        dh_mix = 1 / (1 + math.tan(alpha2_rad) ** 2) * ((1 - p["eps_wake"] - b_star) / (1 - p["eps_wake"])) ** 2 \
+            * c2 ** 2 / 2
+        dh_int = dh_bl + dh_inc + dh_sf + dh_cl + dh_mix
+        # Паразитные потери: трение диска (Daily & Nece), рециркуляция (Oh), утечки (Aungier)
+        T02 = T01 + dh_euler / cp  # первое приближение для вязкости и плотности
+        T2 = T02 - c2 ** 2 / (2 * cp)
+        mu2 = 1.716e-5 * (T2 / 273.15) ** 1.5 * (273.15 + 110.4) / (T2 + 110.4)
+        Re_df = u2 * r2 * rho2 / mu2
+        f_df = 2.67 / Re_df ** 0.5 if Re_df < 3e5 else 0.0622 / Re_df ** 0.2
+        dh_df = f_df * (rho1 + rho2) / 2 * r2 ** 2 * u2 ** 3 / (4 * G)
+        dh_rc = 8e-5 * math.sinh(3.5 * alpha2_rad ** 3) * Df ** 2 * u2 ** 2
+        dP_cl = G * r2 * c2u / (z_all * (r1t + r2) / 2 * (b2 + (r1t - r1h)) / 2 * L_b)
+        U_cl = 0.816 * math.sqrt(2 * dP_cl / rho2)
+        m_cl = rho2 * z_all * p["eps_tip"] * L_b * U_cl
+        dh_lk = m_cl * U_cl * u2 / (2 * G)
+        dh_par = dh_df + dh_rc + dh_lk
+        T02 = T01 + (dh_euler + dh_par) / cp
+        p02 = p01 * (1 + (dh_euler - dh_int) / (cp * T01)) ** (k / (k - 1))
+        T2, p2 = _static(T02, p02, c2)
+        rho2_new = p2 / (R * T2)
+        if abs(rho2_new - rho2) < 1e-6:
             break
-        alpha_end = alpha_new
-    alpha2 = math.degrees(math.atan2(c2r, c2u))  # п. 9
-    w2u = u2 - c2u
-    w2 = math.hypot(c2r, w2u)
-    beta2 = math.degrees(math.atan2(c2r, w2u))
-    T2_star = T2 + c2 ** 2 / (2 * cp)
-    lam_c2 = c2 / a_cr(T2_star)
-    p2_star = p2 / gdf_pi(lam_c2)
-    H_ad_rk = cp * sr["T"] * ((p2 / sr["p"]) ** ((k - 1) / k) - 1)  # п. 12
-    eta_rk = (H_ad_rk + (c2 ** 2 - sr["c"] ** 2) / 2) / H_z  # п. 13
-    rho_st = 1 - (c2 ** 2 - sr["c"] ** 2) / 2 / (H_z - alpha_end * u2 ** 2)  # степень реактивности
-    res.update(z=z, z_min=z_min, mu=mu, c2r=c2r, c2u=c2u, c2=c2, alpha_end=alpha_end, H_z=H_z, T2=T2, p2=p2,
-               rho2=rho2, b2=b2, n_poly_rk=nk / (nk - 1), alpha2=alpha2, w2=w2, w2u=w2u, beta2=beta2,
-               T2_star=T2_star, p2_star=p2_star, lam_c2=lam_c2, M_c2=c2 / math.sqrt(k * R * T2),
-               H_ad_rk=H_ad_rk, eta_rk=eta_rk, rho_st=rho_st)
+        rho2 = rho2_new
+    eta_rk = cp * T01 * ((p02 / p01) ** ((k - 1) / k) - 1) / (cp * (T02 - T01))
+    res.update(D2=D2, u2=u2, z_eff=z_eff, z_all=z_all, slip=sigma, c2r=c2r, c2u=c2u, c2=c2, w2=w2,
+               alpha2=math.degrees(math.atan2(c2r, c2u)), alpha2_rad_deg=math.degrees(alpha2_rad),
+               beta2=math.degrees(math.atan2(c2r, u2 - c2u)), dh_euler=dh_euler, Df=Df, b2=b2, D_hyd=D_hyd, L_b=L_b,
+               losses_int=dict(удар=dh_inc, нагрузка=dh_bl, трение=dh_sf, зазор=dh_cl, смешение=dh_mix),
+               losses_par=dict(трение_диска=dh_df, рециркуляция=dh_rc, утечки=dh_lk),
+               T02=T02, p02=p02, T2=T2, p2=p2, rho2=rho2, eta_rk=eta_rk, W2_W1t=w2 / w1t,
+               M_c2=c2 / math.sqrt(k * R * T2), lam_c2=c2 / a_cr(T02), n_rpm=n)
 
-    # ---------- Безлопаточный диффузор (с. 159, 160) ----------
-    D3 = p["D3_D2"] * D2
-    b3 = b2
-    c3 = c2 * D2 * b2 / (D3 * b3)  # п. 2
-    T3 = T2 + (c2 ** 2 - c3 ** 2) / (2 * cp)  # п. 3
-    T3_star = T3 + c3 ** 2 / (2 * cp)  # п. 4
-    M3 = c3 / math.sqrt(k * R * T3)  # п. 5
-    p3 = p2 * (T3 / T2) ** (p["n_bld"] / (p["n_bld"] - 1))  # п. 7
-    rho3 = p3 / (R * T3)
-    p3_star = p3 * (1 + (k - 1) / 2 * M3 ** 2) ** (k / (k - 1))  # п. 8
-    alpha3 = math.degrees(math.atan(b2 * rho2 / (b3 * rho3) * math.tan(math.radians(alpha2))))  # п. 9
-    res.update(D3=D3, b3=b3, c3=c3, T3=T3, T3_star=T3_star, M3=M3, p3=p3, rho3=rho3, p3_star=p3_star,
-               alpha3=alpha3, sigma_bld=p3_star / p2_star)
+    # ---------------- Радиальный БЛД (станция 3) ----------------
+    r3 = p["D3_D2"] * r2
+    b3 = p["b3_b2"] * b2
+    st2 = dict(T0=T02, p0=p02, r=r2, cu=c2u, cm=c2r)
+    st3 = _friction_march(st2, r3 - r2, lambda s: (r2 + s, b2 + (b3 - b2) * s / (r3 - r2)), p["cf_vd"], G)
+    res.update(D3=2 * r3, b3=b3, st3=st3, alpha3=math.degrees(math.atan2(st3["cm"], st3["cu"])),
+               M3=st3["c"] / math.sqrt(k * R * st3["T"]))
 
-    # ---------- Лопаточный диффузор (с. 161…163) ----------
-    D4 = p["D4_D3"] * D3  # п. 1
-    alpha4 = alpha3 + p["d_alpha4"]  # п. 2
-    b4 = b3
-    F4 = math.pi * D4 * b4 * math.sin(math.radians(alpha4))  # п. 3
-    F3 = math.pi * D3 * b3 * math.sin(math.radians(alpha3))  # п. 4
-    z_ld_raw = 360 / p["theta_ld"] * (F4 / F3 - 1) / (D4 / D3 - 1) * math.sin(math.radians(alpha3)) ** 2  # п. 5
-    z_ld = _coprime_blade_number(z_ld_raw, z)
-    xi_ld = 0.17 if M3 <= 0.7 else 0.22  # п. 11
-    delta_ld = 1.0  # п. 6
-    for _ in range(50):
-        p4_star = delta_ld * p3_star
-        lam4 = lambda_from_q(G * math.sqrt(T3_star) / (s_v * p4_star * F4))  # п. 7, 8
-        c4 = lam4 * a_cr(T3_star)  # п. 9
-        T4 = T3 + (c3 ** 2 - c4 ** 2) / (2 * cp)  # п. 10
-        dE_ld = (c3 ** 2 - c4 ** 2) / 2
-        if dE_ld <= 0:
-            raise ValueError(f"c4 = {c4:.0f} ≥ c3 = {c3:.0f} м/с — ЛД не тормозит поток")
-        n_ld = k / (k - 1) * (1 - xi_ld * c3 ** 2 / 2 / dE_ld)  # п. 11
-        p4 = p3 * (T4 / T3) ** n_ld  # п. 12
-        p4_star_new = p4 / gdf_pi(lam4)  # п. 13 (p4* = p4/π(λ4))
-        delta_new = p4_star_new / p3_star  # п. 14
-        if abs(delta_new - delta_ld) < 1e-6:
-            break
-        delta_ld = delta_new
-    res.update(D4=D4, b4=b4, alpha4=alpha4, F3=F3, F4=F4, z_ld_raw=z_ld_raw, z_ld=z_ld, xi_ld=xi_ld, lam4=lam4,
-               c4=c4, T4=T4, p4=p4, p4_star=p4_star_new, sigma_ld=delta_ld, rho4=p4 / (R * T4))
+    # ---------------- Переходное колено: радиальное → осевое (станция 4) ----------------
+    Rb = p["Rb_b3"] * b3
+    r4 = r3 + Rb
+    h4 = p["AR_bend"] * r3 * b3 / r4  # высота кольцевого канала на выходе из колена
+    L_bend = math.pi / 2 * Rb
 
-    # ---------- Выходное устройство (с. 163, 164) ----------
-    c_k = p["c_k"]
-    T_k = T4 + (c4 ** 2 - c_k ** 2) / (2 * cp)  # п. 2
-    dE_vu = (c4 ** 2 - c_k ** 2) / 2
-    if dE_vu <= 0:
-        raise ValueError(f"c_к = {c_k:.0f} ≥ c4 = {c4:.0f} м/с (с. 163: должно быть c_к < c4)")
-    n_vu = k / (k - 1) * (1 - p["xi_vu"] * c4 ** 2 / 2 / dE_vu)  # п. 3
-    p_k = p4 * (T_k / T4) ** n_vu  # п. 4
-    T_k_star = T3_star  # п. 5
-    lam_k = c_k / a_cr(T_k_star)
-    p_k_star = p_k / gdf_pi(lam_k)  # п. 6
-    pi_calc = p_k_star / p_n  # п. 7
-    eta_k = H / H_z  # п. 8
-    res.update(c_k=c_k, T_k=T_k, p_k=p_k, T_k_star=T_k_star, p_k_star=p_k_star, pi_calc=pi_calc, eta_k=eta_k,
-               N=H_z * G, G=G, pik=pik, p_n=p_n, T_n=T_n, S=p["S_D2"] * D2)
+    def bend_geom(s):
+        phi = s / Rb
+        r = r3 + Rb * math.sin(phi)
+        A = 2 * math.pi * r3 * b3 + (2 * math.pi * r4 * h4 - 2 * math.pi * r3 * b3) * s / L_bend
+        return r, A / (2 * math.pi * r)
+
+    st4 = _friction_march(st3, L_bend, bend_geom, p["cf_vd"], G)
+    # Потери от кривизны: доля меридионального скоростного напора
+    dq_b = p["zeta_bend"] * st4["cm"] ** 2 / 2
+    st4["p0"] *= math.exp(-dq_b / (st4["T"] * R))
+    st4["T"], st4["p"] = _static(st4["T0"], st4["p0"], st4["c"])
+    alpha4 = math.degrees(math.atan2(st4["cu"], st4["cm"]))  # угол закрутки от оси
+    res.update(D4m=2 * r4, h4=h4, Rb=Rb, st4=st4, alpha4=alpha4, M4=st4["c"] / math.sqrt(k * R * st4["T"]))
+
+    # ---------------- Осевой ЛД: спрямляющие венцы (станция 5) ----------------
+    # Углы от оси. Поворот распределён так, чтобы отношение cos α_вых/cos α_вх (торможение) во всех венцах
+    # было одинаковым — тогда венцы нагружены равномерно по D_eq; c_a меняется за счёт расширения канала.
+    rows = []
+    T0, p0 = st4["T0"], st4["p0"]
+    ca, cu = st4["cm"], st4["cu"]
+    a_in = alpha4
+    n_rows = p["n_rows"]
+    A_in = 2 * math.pi * r4 * h4
+    for j in range(n_rows):
+        q = (math.cos(math.radians(p["alpha_out"])) / math.cos(math.radians(alpha4))) ** (1 / n_rows)
+        a_out = math.degrees(math.acos(min(1.0, math.cos(math.radians(alpha4)) * q ** (j + 1))))
+        A_out = A_in * p["AR_ld"] ** ((j + 1) / n_rows)
+        c_in = math.hypot(ca, cu)
+        T_in, p_in = _static(T0, p0, c_in)
+        ca_out = ca
+        for _ in range(30):  # осевая скорость на выходе венца из уравнения расхода
+            c_out = ca_out / math.cos(math.radians(a_out))
+            T_o, p_o = _static(T0, p0, c_out)
+            ca_new = G / (p_o / (R * T_o) * A_out)
+            if abs(ca_new - ca_out) < 1e-6:
+                break
+            ca_out = ca_new
+        a1r, a2r = math.radians(a_in), math.radians(a_out)
+        s_ = p["sigma_ld"]
+        # [L]: эквивалентный диффузорный фактор (при c_a1 ≠ c_a2 — через отношение скоростей)
+        D_eq = (c_in / c_out) * (1.12 + 0.61 * math.cos(a1r) ** 2 / s_ * (math.tan(a1r) - (ca_out / ca) * math.tan(a2r)))
+        theta_c = 0.004 * (1 + 3.1 * (D_eq - 1) ** 2 + 0.4 * (D_eq - 1) ** 8)
+        omega = 2 * theta_c * s_ / math.cos(a2r) * (math.cos(a1r) / math.cos(a2r)) ** 2
+        D_f = 1 - c_out / c_in + abs(ca * math.tan(a1r) - ca_out * math.tan(a2r)) / (2 * s_ * c_in)
+        if D_eq > 3.0:
+            raise ValueError(f"Срыв в венце ЛД {j + 1}: D_eq = {D_eq:.2f}")
+        p0_out = p0 - omega * (p0 - p_in)
+        # Лопаточные углы (от оси): вход — без угла атаки, выход — с отставанием по правилу Картера
+        theta_est = abs(a_in - a_out)
+        for _ in range(20):
+            dev = 0.23 * theta_est / math.sqrt(s_)
+            theta_new = abs(a_in - (a_out - dev))
+            if abs(theta_new - theta_est) < 1e-6:
+                break
+            theta_est = theta_new
+        rows.append(dict(a_in=a_in, a_out=a_out, c_in=c_in, c_out=c_out, D_eq=D_eq, D_f=D_f, omega=omega,
+                         M_in=c_in / math.sqrt(k * R * T_in), dev=dev, blade_in=a_in, blade_out=a_out - dev,
+                         camber=theta_est, sigma=s_))
+        p0 = p0_out
+        ca, cu = ca_out, ca_out * math.tan(a2r)
+        a_in = a_out
+    c5 = math.hypot(ca, cu)
+    T5, p5 = _static(T0, p0, c5)
+    res.update(rows=rows, T05=T0, p05=p0, c5=c5, h5=A_in * p["AR_ld"] / (2 * math.pi * r4))
+
+    pi_calc = p0 / p01
+    H = cp * T01 * (pi_calc ** ((k - 1) / k) - 1)
+    res.update(pi_calc=pi_calc, H=H, H_z=cp * (T0 - T01), eta_k=H / (cp * (T0 - T01)), N=G * cp * (T0 - T01),
+               G=G, pik=pik_target, p01=p01, T01=T01, S=p["Lz_D2"] * D2)
     return res
 
 
 def compressor(pik, G, p_n, T_n, **params):
-    """
-    Расчёт ЦБК на заданные π*_к, расход G (кг/с) и полные параметры на входе p_н* (Па), T_н* (К).
-    H̄ подбирается так, чтобы расчётная π*_к совпала с заданной (с. 164, п. 7): вместо ручной корректировки
-    на 2 % решается уравнение π*_расч(H̄) = π*_задан методом секущих.
-    """
+    """Расчёт ЦБК на заданные π*_к и расход; u2 (а при заданной n — и D2) подбирается из условия π*_расч = π*_к"""
     p = dict(DEFAULTS)
     unknown = set(params) - set(p)
     if unknown:
         raise KeyError(f"Неизвестные параметры компрессора: {unknown}")
     p.update(params)
 
-    def f(H_bar):
-        return _stage(pik, G, p_n, T_n, H_bar, p)["pi_calc"] - pik
+    def f(u2):
+        return _stage(pik, G, p_n, T_n, u2, p)["pi_calc"] - pik
 
-    x0, x1 = p["H_bar0"], p["H_bar0"] - 0.02
+    x0, x1 = 520.0, 560.0
     f0, f1 = f(x0), f(x1)
-    for _ in range(50):
-        x2 = x1 - f1 * (x1 - x0) / (f1 - f0)
-        x2 = min(max(x2, 0.35), 0.98)
+    for _ in range(60):
+        if f1 == f0:
+            break
+        x2 = min(max(x1 - f1 * (x1 - x0) / (f1 - f0), 300.0), 800.0)
         x0, f0, x1, f1 = x1, f1, x2, f(x2)
-        if abs(f1) / pik < 1e-5:
+        if abs(f1) / pik < 1e-6:
             break
     res = _stage(pik, G, p_n, T_n, x1, p)
     res["params"] = p
@@ -250,116 +336,103 @@ def compressor(pik, G, p_n, T_n, **params):
     return res
 
 
-def _material(T_k_star):
-    """Материал диска рабочего колеса по температуре на выходе (с. 152, п. 6)"""
-    if T_k_star < 520:
+def _checks(r, p):
+    w = []
+    if abs(r["pi_calc"] - r["pik"]) / r["pik"] > 1e-3:
+        w.append(f"π*_расч = {r['pi_calc']:.3f} не сошлась с заданной {r['pik']}")
+    if r["M_w1t"] > 1.3:
+        w.append(f"M_w1 на периферии = {r['M_w1t']:.2f} > 1,3 — трансзвуковой вход с большими потерями")
+    if r["u2"] > 620:
+        w.append(f"u2 = {r['u2']:.0f} м/с > 620 м/с — предел для титанового колеса")
+    if r["W2_W1t"] < 0.6:
+        w.append(f"w2/w1к = {r['W2_W1t']:.3f} < 0,6 — чрезмерное торможение в РК (критерий де Галлера)")
+    if r["b2"] < 5e-3:
+        w.append(f"b2 = {r['b2'] * 1000:.2f} мм < 5 мм")
+    if r["D1t"] / r["D2"] > 0.7:
+        w.append(f"D1к/D2 = {r['D1t'] / r['D2']:.3f} > 0,7")
+    if not 60 <= r["alpha2_rad_deg"] <= 75:
+        w.append(f"Угол потока за РК от радиуса α2 = {r['alpha2_rad_deg']:.1f}° вне 60…75° "
+                 f"(больше — неустойчивость БЛД, меньше — большая c2r)")
+    if r["M4"] > 0.85:
+        w.append(f"M на входе в осевой ЛД = {r['M4']:.2f} > 0,85")
+    for j, row in enumerate(r["rows"], 1):
+        if row["D_eq"] > 2.0:
+            w.append(f"Венец ЛД {j}: D_eq = {row['D_eq']:.2f} > 2,0 — срыв (Lieblein)")
+        if row["D_f"] > 0.6:
+            w.append(f"Венец ЛД {j}: диффузорный фактор D = {row['D_f']:.2f} > 0,6")
+    if not 90 <= r["c5"] <= 150:
+        w.append(f"Скорость на выходе c_к = {r['c5']:.0f} м/с вне 100…140 м/с ([К], с. 163)")
+    return w
+
+
+def _material(T):
+    if T < 520:
         return "алюминиевый сплав"
-    if T_k_star <= 770:
+    if T <= 770:
         return "титановый сплав"
     return "жаропрочная сталь или сплав"
 
 
-def _checks(r, p):
-    """Проверки по рекомендациям книги. Возвращает список предупреждений."""
-    w = []
-
-    def rng(name, val, lo, hi, ref):
-        if not lo <= val <= hi:
-            w.append(f"{name} = {val:.3f} вне рекомендуемых {lo}…{hi} ({ref})")
-
-    rng("u2, м/с", r["u2"], 400, 550, "с. 151, п. 5")
-    rng("D1/D2", r["D1_D2"], 0.55, 0.70, "с. 153, п. 11")
-    rng("c1, м/с", r["c1"], 120, 150, "с. 152, п. 10")
-    rng("c̄1a = c1a/u2", r["c1a_bar"], 0.25, 0.35, "с. 154, п. 19")
-    rng("α2, град", r["alpha2"], 14, 18, "с. 158, п. 9")
-    rng("α концевых потерь", r["alpha_end"], 0.04, 0.08, "с. 157, п. 3")
-    rng("η_к", r["eta_k"], 0.78, 0.83, "с. 164, п. 8")
-    rng("H̄/η_к", r["H_bar"] / r["eta_k"], 0.85, 1.1, "с. 164, п. 9")
-    rng("Число лопаток ЛД", r["z_ld_raw"], 9, 25, "с. 161, п. 5")
-    if abs(p["beta2l"] - 90) < 1e-9:
-        rng("H̄", r["H_bar"], 0.65, 0.75, "с. 151, п. 4, радиальные лопатки")
-    if r["M_w1"] > 0.9:
-        w.append(f"M_w1 = {r['M_w1']:.3f} > 0,9 — нужна предварительная закрутка (α1 < 90°) (с. 154, п. 18)")
-    if r["z_min"] > p["z_vna"]:
-        w.append(f"z_ВНА = {p['z_vna']} < z_min = {r['z_min']:.1f}: число лопаток РК увеличено до {r['z']} "
-                 f"(с. 157, п. 1)")
-    if r["z"] > 25:
-        w.append(f"z_РК = {r['z']} > 25 — много лопаток на входе: рассмотрите промежуточные (укороченные) лопатки")
-    if r["M3"] > 0.95:
-        w.append(f"M3 = {r['M3']:.3f} > 0,95 (с. 160, п. 5)")
-    if r["c_k"] >= r["c4"]:
-        w.append(f"c_к = {r['c_k']:.0f} ≥ c4 = {r['c4']:.0f} м/с — в выходном устройстве должно быть c_к < c4 (с. 163)")
-    if r["eta_k"] >= r["eta_rk"]:
-        w.append(f"η_к = {r['eta_k']:.3f} ≥ η_РК = {r['eta_rk']:.3f} — должно быть η_к < η_РК (с. 164, п. 8)")
-    if r["b2"] < 5e-3:
-        w.append(f"b2 = {r['b2'] * 1000:.2f} мм < 5 мм — высота лопатки на выходе мала")
-    return w
-
-
 def print_report(r):
     p = r["params"]
-    print("=" * 78)
-    print("   ГАЗОДИНАМИЧЕСКИЙ РАСЧЁТ ЦЕНТРОБЕЖНОГО КОМПРЕССОРА (разд. 6.10)")
-    print("=" * 78)
-    print(f"Исходные данные: π*_к = {r['pik']:.3f}, G = {r['G']:.3f} кг/с, p_н* = {r['p_n'] / 1000:.2f} кПа, "
-          f"T_н* = {r['T_n']:.2f} К")
+    print("=" * 84)
+    print("   ГАЗОДИНАМИЧЕСКИЙ РАСЧЁТ ЦБК: РК + радиальный БЛД + колено + осевой ЛД")
+    print("=" * 84)
+    print(f"π*_к = {r['pik']:.3f}, G = {r['G']:.3f} кг/с, p* = {r['p01'] / 1000:.2f} кПа, T* = {r['T01']:.2f} К, "
+          f"n = {r['n_rpm']:.0f} об/мин")
 
-    print("\n─── Основные параметры ───")
-    print(f"  Изоэнтропная работа H = {r['H'] / 1000:.2f} кДж/кг")
-    print(f"  H̄ = {r['H_bar']:.4f} (подобран по π*), u2 = {r['u2']:.1f} м/с (400…550)")
-    print(f"  D1 = {r['D1'] * 1000:.1f} мм, D_вт = {r['D_vt'] * 1000:.1f} мм (d̄_вт = {p['d_vt']}), "
-          f"D2 = {r['D2'] * 1000:.1f} мм")
-    print(f"  (D1/D2)_опт = {r['D1_D2']:.3f} (0,55…0,70), k_α = {r['k_alpha']:.3f}")
-    print(f"  n = {r['n_rpm']:.0f} об/мин, u1 = {r['u1']:.1f} м/с")
-    print(f"  λ1 = {r['lam1']:.3f}, c1 = {r['c1']:.1f} м/с (120…150), c̄1a = {r['c1a_bar']:.3f} (0,25…0,35)")
-    print(f"  w1 (периферия) = {r['w1']:.1f} м/с, M_w1 = {r['M_w1']:.3f} (≤ 0,8…0,9)")
-
-    print("\n─── ВНА: параметры и углы по высоте (β от окружного направления) ───")
-    print(f"  z_ВНА = {p['z_vna']}, хорда b = {r['chord_vna'] * 1000:.1f} мм")
-    print(f"  {'h/h':<5} | {'D, мм':<7} | {'u1, м/с':<8} | {'c1a, м/с':<8} | {'w1, м/с':<8} | {'M_w1':<6} | "
-          f"{'β1, °':<7} | {'i, °':<5} | {'β1л, °':<7} | {'θ, °':<6} | {'b/t':<5} | {'R_ср.л, мм':<9}")
-    print("  " + "-" * 110)
+    print("\n─── Вход в РК (без входного направляющего аппарата, c1u = 0) ───")
+    print(f"  D1к = {r['D1t'] * 1000:.1f} мм, D1вт = {r['D1h'] * 1000:.1f} мм (ν = {p['nu_hub']}), "
+          f"c1a = {r['c1a']:.1f} м/с, M_c1 = {r['M_c1']:.3f}")
+    print(f"  w1к = {r['w1t']:.1f} м/с, M_w1к = {r['M_w1t']:.3f}")
+    print(f"  {'h/h':<5} | {'D, мм':<7} | {'u1, м/с':<8} | {'w1, м/с':<8} | {'M_w1':<6} | {'β1, °':<7} | {'i, °':<5} | "
+          f"{'β1л, °':<7}")
+    print("  " + "-" * 70)
     for s in r["sections"]:
-        print(f"  {s['h_rel']:<5.2f} | {s['D'] * 1000:<7.1f} | {s['u']:<8.1f} | {s['ca']:<8.1f} | {s['w']:<8.1f} | "
-              f"{s['M_w']:<6.3f} | {s['beta']:<7.2f} | {s['i']:<5.2f} | {s['beta_l']:<7.2f} | {s['theta']:<6.2f} | "
-              f"{s['b_t']:<5.2f} | {s['R_ml'] * 1000:<9.1f}")
-    print("  β1л = β1 + i; θ = 90° − β1л — угол изгиба лопатки ВНА (выход ВНА осевой-радиальный, β = 90°)")
+        print(f"  {s['h_rel']:<5.2f} | {s['D'] * 1000:<7.1f} | {s['u']:<8.1f} | {s['w']:<8.1f} | {s['M_w']:<6.3f} | "
+              f"{s['beta']:<7.2f} | {s['i']:<5.2f} | {s['beta_l']:<7.2f}")
 
     print("\n─── Рабочее колесо ───")
-    print(f"  z_РК = {r['z']} (z_min = {r['z_min']:.1f}), β2л = {p['beta2l']:.1f}°, μ = {r['mu']:.4f}")
-    print(f"  α концевых потерь = {r['alpha_end']:.4f} (0,04…0,08), H_z = {r['H_z'] / 1000:.2f} кДж/кг")
-    print(f"  c2r = {r['c2r']:.1f} м/с, c2u = {r['c2u']:.1f} м/с, c2 = {r['c2']:.1f} м/с, λ_c2 = {r['lam_c2']:.3f}")
-    print(f"  w2 = {r['w2']:.1f} м/с, β2 (поток) = {r['beta2']:.2f}°, α2 = {r['alpha2']:.2f}° (14…18°)")
-    print(f"  T2 = {r['T2']:.1f} К, p2 = {r['p2'] / 1000:.1f} кПа, T2* = {r['T2_star']:.1f} К, "
-          f"p2* = {r['p2_star'] / 1000:.1f} кПа")
-    print(f"  Показатель политропы n = {r['n_poly_rk']:.3f}, ρ2 = {r['rho2']:.3f} кг/м³")
-    print(f"  Ширина лопаток на выходе b2 = {r['b2'] * 1000:.2f} мм (b2/D2 = {r['b2'] / r['D2']:.4f})")
-    print(f"  η_РК = {r['eta_rk']:.4f}, степень реактивности ρ = {r['rho_st']:.3f}")
+    print(f"  u2 = {r['u2']:.1f} м/с, D2 = {r['D2'] * 1000:.1f} мм, D1к/D2 = {r['D1t'] / r['D2']:.3f}")
+    print(f"  Лопаток {p['z_main']} + {p['z_split']} промежуточных, β2л = {p['beta2l']:.1f}° "
+          f"(загиб назад {90 - p['beta2l']:.1f}°), скольжение σ = {r['slip']:.4f}")
+    print(f"  c2r = {r['c2r']:.1f}, c2u = {r['c2u']:.1f}, c2 = {r['c2']:.1f} м/с, M_c2 = {r['M_c2']:.3f}, "
+          f"w2 = {r['w2']:.1f} м/с, w2/w1к = {r['W2_W1t']:.3f}")
+    print(f"  α2 = {r['alpha2']:.2f}° от окружного ({r['alpha2_rad_deg']:.1f}° от радиуса), β2 = {r['beta2']:.2f}°")
+    print(f"  b2 = {r['b2'] * 1000:.2f} мм (b2/D2 = {r['b2'] / r['D2']:.4f}), Df = {r['Df']:.3f}")
+    print(f"  Работа Эйлера {r['dh_euler'] / 1000:.2f} кДж/кг")
+    print("  Внутренние потери, кДж/кг: " + ", ".join(f"{kk} {v / 1000:.2f}" for kk, v in r["losses_int"].items()))
+    print("  Паразитные потери, кДж/кг: " + ", ".join(f"{kk} {v / 1000:.2f}" for kk, v in r["losses_par"].items()))
+    print(f"  p2* = {r['p02'] / 1000:.1f} кПа, T2* = {r['T02']:.1f} К, η_РК = {r['eta_rk']:.4f}")
 
-    print("\n─── Безлопаточный диффузор ───")
-    print(f"  D3 = {r['D3'] * 1000:.1f} мм, b3 = {r['b3'] * 1000:.2f} мм, c3 = {r['c3']:.1f} м/с, "
-          f"M3 = {r['M3']:.3f} (≤ 0,95), α3 = {r['alpha3']:.2f}°")
-    print(f"  p3* = {r['p3_star'] / 1000:.1f} кПа, σ_БЛД = {r['sigma_bld']:.4f}")
+    s3, s4 = r["st3"], r["st4"]
+    print("\n─── Радиальный БЛД ───")
+    print(f"  D3 = {r['D3'] * 1000:.1f} мм, b3 = {r['b3'] * 1000:.2f} мм, c3 = {s3['c']:.1f} м/с, M3 = {r['M3']:.3f}, "
+          f"α3 = {r['alpha3']:.1f}° от окружного, σ_БЛД = {s3['p0'] / r['p02']:.4f}")
+    print("\n─── Переходное колено (радиальное → осевое) ───")
+    print(f"  R_кол = {r['Rb'] * 1000:.1f} мм, D_ср = {r['D4m'] * 1000:.1f} мм, h = {r['h4'] * 1000:.2f} мм, "
+          f"c4 = {s4['c']:.1f} м/с (c_a = {s4['cm']:.1f}, c_u = {s4['cu']:.1f}), M4 = {r['M4']:.3f}")
+    print(f"  Угол закрутки на входе в ЛД α = {r['alpha4']:.1f}° от оси, σ_кол = {s4['p0'] / s3['p0']:.4f}")
+    print("\n─── Осевой лопаточный диффузор (углы от оси) ───")
+    print(f"  {'Венец':<5} | {'α_вх':<6} | {'α_вых':<6} | {'c_вх':<6} | {'c_вых':<6} | {'M_вх':<5} | {'D_eq':<5} | "
+          f"{'D':<5} | {'ω':<6} | {'δ':<5} | {'лоп. вх':<7} | {'лоп. вых':<8} | {'θ':<5}")
+    for j, row in enumerate(r["rows"], 1):
+        print(f"  {j:<5} | {row['a_in']:<6.1f} | {row['a_out']:<6.1f} | {row['c_in']:<6.1f} | {row['c_out']:<6.1f} | "
+              f"{row['M_in']:<5.2f} | {row['D_eq']:<5.2f} | {row['D_f']:<5.2f} | {row['omega']:<6.4f} | "
+              f"{row['dev']:<5.2f} | {row['blade_in']:<7.1f} | {row['blade_out']:<8.1f} | {row['camber']:<5.1f}")
+    print(f"  Выход: c_к = {r['c5']:.1f} м/с, высота канала {r['h5'] * 1000:.1f} мм, "
+          f"σ_ЛД = {r['p05'] / s4['p0']:.4f}")
 
-    print("\n─── Лопаточный диффузор ───")
-    print(f"  D4 = {r['D4'] * 1000:.1f} мм, α3 = {r['alpha3']:.2f}° → α4 = {r['alpha4']:.2f}°, "
-          f"z_ЛД = {r['z_ld']} (по формуле {r['z_ld_raw']:.1f})")
-    print(f"  ξ_ЛД = {r['xi_ld']}, λ4 = {r['lam4']:.3f}, c4 = {r['c4']:.1f} м/с, "
-          f"p4* = {r['p4_star'] / 1000:.1f} кПа, σ_ЛД = {r['sigma_ld']:.4f}")
-
-    print("\n─── Выходное устройство и компрессор в целом ───")
-    print(f"  c_к = {r['c_k']:.0f} м/с, T_к* = {r['T_k_star']:.1f} К, p_к* = {r['p_k_star'] / 1000:.1f} кПа")
-    print(f"  π*_к расч = {r['pi_calc']:.4f} (задано {r['pik']:.4f})")
-    print(f"  η_к = H/H_z = {r['eta_k']:.4f} (0,78…0,83), H̄/η_к = {r['H_bar'] / r['eta_k']:.3f} (0,85…1,1)")
-    print(f"  Мощность привода N = H_z·G = {r['N'] / 1000:.1f} кВт")
-    print(f"  Материал колеса при T_к* = {r['T_k_star']:.0f} К: {_material(r['T_k_star'])} (с. 152, по температуре)")
-    if _material(r["T_k_star"]) == "алюминиевый сплав" and r["u2"] > 450:
-        print(f"  ⚠️ При u2 = {r['u2']:.0f} м/с алюминиевое колесо обычно не проходит по прочности (запас k_m ≈ 2, "
-              f"с. 151, п. 6) — принять титановый сплав")
-
+    print("\n─── Компрессор в целом ───")
+    print(f"  π*_к = {r['pi_calc']:.4f}, η_к* = {r['eta_k']:.4f}, T_к* = {r['T05']:.1f} К, "
+          f"N = {r['N'] / 1000:.1f} кВт")
+    print(f"  Материал колеса по T_к* ([К], с. 152): {_material(r['T05'])}; при u2 = {r['u2']:.0f} м/с — титановый сплав")
+    if r["eta_k"] > 0.83:
+        print(f"  Примечание: η_к = {r['eta_k']:.3f} выше типичных для малоразмерных ЦБК 0,78…0,83 ([К], с. 164) — "
+              f"модель потерь по средней линии не учитывает, например, неравномерность потока на входе в диффузор")
     if r["warnings"]:
         print("\n⚠️ Замечания:")
         for msg in r["warnings"]:
             print("   - " + msg)
     else:
-        print("\n✅ Все параметры в рекомендуемых пределах")
+        print("\n✅ Все проверки пройдены")

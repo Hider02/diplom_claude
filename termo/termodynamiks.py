@@ -30,15 +30,16 @@ def k_from_cp(cp, R):
 
 
 #Компрессор
-g_v_pr = 4.795     # Приведённый расход воздуха, кг/с (подобран kompressor/podbor.py под 800 л.с. + 5 %)
+g_v_pr = 3.3     # Приведённый расход воздуха, кг/с
 sigma_vh = 0.96     # Потери полного давления в воздухозаборнике
-pik = 4.5     # Степень сжатия ступени центробежного компрессора (kompressor/podbor.py)
+pik = 7.0     # Степень повышения давления ЦБК (kompressor/podbor.py)
 # КПД компрессора берётся из газодинамического расчёта ЦБК (kompressor/cbk.py). Если ETA_K_IZ_KOMPRESSORA = False,
 # используется оценочное значение eta_k_ocenka
 ETA_K_IZ_KOMPRESSORA = True
 eta_k_ocenka = 0.82        # Оценочный КПД ЦБК
 # Конструктивные параметры ЦБК (в пределах рекомендаций книги, подобраны kompressor/podbor.py)
-KOMP = dict(G_bar=0.559, d_vt=0.5, alpha1=78.606, beta2l=86.065, D3_D2=1.15, D4_D3=1.35, d_alpha4=18.0, z_vna=25)
+KOMP = dict(n_rpm=42691, nu_hub=0.3, k_D1=1.02, beta2l=56.013, z_main=11, z_split=11, cr_ratio=0.877,
+            D3_D2=1.063, b3_b2=0.848, Rb_b3=1.5, AR_bend=1.2, n_rows=4, sigma_ld=1.4, AR_ld=1.0)
 v_la = 0.03     # коэффициент отбора воздуха для ЛА
 
 #КС
