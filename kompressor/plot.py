@@ -5,6 +5,25 @@ import matplotlib.patches as patches
 import numpy as np
 
 
+def _dim_diam(ax, x_block, x_dim, r, label, side):
+    """Размерная линия диаметра: от оси (y=0) до поверхности (y=r), с линией-выноской от контура.
+    side = -1 (линия слева от узла) или +1 (справа) — определяет, куда сдвинута подпись."""
+    ax.plot([x_block, x_dim], [r, r], ":", color="dimgray", lw=0.7)
+    ax.annotate("", xy=(x_dim, r), xytext=(x_dim, 0),
+                arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.9))
+    ax.text(x_dim + side * 0.0035, r / 2, label, rotation=90, ha="center", va="center", fontsize=7.5,
+            color="dimgray")
+
+
+def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
+    """Размерная линия осевого размера, с выносками от контура."""
+    ax.plot([x0, x0], [y0, y_dim], ":", color="dimgray", lw=0.7)
+    ax.plot([x1, x1], [y1, y_dim], ":", color="dimgray", lw=0.7)
+    ax.annotate("", xy=(x1, y_dim), xytext=(x0, y_dim),
+                arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.9))
+    ax.text((x0 + x1) / 2, y_dim, label, ha="center", va="top", fontsize=7.5, color="dimgray")
+
+
 def plot_meridional(r):
     """
     Меридиональное сечение: РК, радиальный БЛД (D2…D3), переходное колено (радиальное → осевое),
@@ -54,9 +73,20 @@ def plot_meridional(r):
     for x, rr, name in ((0, (r_vt + r1) / 2, "1"), (S + b2, r2, "2"), (S + b2, r3, "3"), (x4, r4 - h4, "4"),
                         (x4 + L_ld, r4 - h4, "5")):
         ax.text(x, rr, name, fontsize=11, fontweight="bold")
+
+    # Размерные линии: диаметры на входе (D1) и на выходе из осевого ЛД, осевая длина колеса и ЛД
+    dx1, dx2 = 0.16 * r1, 0.34 * r1
+    off = 0.12 * r1
+    _dim_diam(ax, 0.0, -dx1, r_vt, f"⌀{2 * r_vt * 1000:.0f}", -1)
+    _dim_diam(ax, 0.0, -dx2, r1, f"⌀{2 * r1 * 1000:.0f}", -1)
+    _dim_diam(ax, x4 + L_ld, x4 + L_ld + dx1, r5_in, f"⌀{2 * r5_in * 1000:.0f}", 1)
+    _dim_diam(ax, x4 + L_ld, x4 + L_ld + dx2, r5_out, f"⌀{2 * r5_out * 1000:.0f}", 1)
+    _dim_width(ax, 0.0, S, r1, r2, r2 + off, f"S={S * 1000:.0f}")
+    _dim_width(ax, x4, x4 + L_ld, r4 + h4 / 2, r4 + h4 / 2, r4 + h4 / 2 + off, f"L={L_ld * 1000:.0f}")
+
     ax.set_aspect("equal")
-    ax.set_xlim(-0.3 * S, x4 + L_ld * 1.25)
-    ax.set_ylim(0, r4 + max(h4, r["h5"]) * 3)
+    ax.set_xlim(min(-0.3 * S, -dx2 - 0.010), max(x4 + L_ld * 1.25, x4 + L_ld + dx2 + 0.010))
+    ax.set_ylim(0, max(r4 + max(h4, r["h5"]) * 3, r2 + off + 0.015, r4 + h4 / 2 + off + 0.015))
     ax.set_xlabel("Осевая координата, м")
     ax.set_ylabel("Радиус, м")
     ax.set_title(f"Меридиональное сечение ЦБК: D2 = {r['D2'] * 1000:.0f} мм, b2 = {b2 * 1000:.1f} мм, "

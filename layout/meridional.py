@@ -97,7 +97,37 @@ def draw_compressor(ax, r, x0):
     ax.plot([x4, x_out], [r4 - h4 / 2, r5_in], "k-", lw=1.4)
     ax.plot([x4, x_out], [r4 + h4 / 2, r5_out], "k-", lw=1.4)
     ax.text((x0 + x_out) / 2, r4 + h4 * 3.2, "ЦБК", ha="center", fontsize=13, fontweight="bold")
+
+    # Размерные линии: диаметры на входе (D1) и на выходе из осевого ЛД, осевая длина колеса и ЛД
+    dx1, dx2 = 0.16 * r1, 0.34 * r1
+    off = 0.12 * r1
+    _dim_diam(ax, x0, x0 - dx1, r_vt, f"⌀{2 * r_vt:.0f}", -1)
+    _dim_diam(ax, x0, x0 - dx2, r1, f"⌀{2 * r1:.0f}", -1)
+    _dim_diam(ax, x_out, x_out + dx1, r5_in, f"⌀{2 * r5_in:.0f}", 1)
+    _dim_diam(ax, x_out, x_out + dx2, r5_out, f"⌀{2 * r5_out:.0f}", 1)
+    _dim_width(ax, x0, x0 + S, r1, r2, r2 + off, f"S={S:.0f}")
+    _dim_width(ax, x4, x_out, r4 + h4 / 2, r4 + h4 / 2, r4 + h4 / 2 + off, f"L={L_ld:.0f}")
+
     return x0, r_vt, r1, x_out, r5_in, r5_out
+
+
+def _dim_diam(ax, x_block, x_dim, r, label, side):
+    """Размерная линия диаметра: от оси (y=0) до поверхности (y=r), с линией-выноской от контура.
+    side = -1 (линия слева от узла) или +1 (справа) — определяет, куда сдвинута подпись."""
+    ax.plot([x_block, x_dim], [r, r], ":", color="dimgray", lw=0.7)
+    ax.annotate("", xy=(x_dim, r), xytext=(x_dim, 0),
+                arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.9))
+    ax.text(x_dim + side * 3.5, r / 2, label, rotation=90, ha="center", va="center", fontsize=7.5,
+            color="dimgray")
+
+
+def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
+    """Размерная линия осевой ширины узла (СА или РК), под втулочной линией."""
+    ax.plot([x0, x0], [y0, y_dim], ":", color="dimgray", lw=0.7)
+    ax.plot([x1, x1], [y1, y_dim], ":", color="dimgray", lw=0.7)
+    ax.annotate("", xy=(x1, y_dim), xytext=(x0, y_dim),
+                arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.9))
+    ax.text((x0 + x1) / 2, y_dim, label, ha="center", va="top", fontsize=7.5, color="dimgray")
 
 
 def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral"):
@@ -133,12 +163,25 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
             color="darkred")
     ax.text((z_ca_in + z_rk_out) / 2, max(r_ca_tip, r_rk_tip_out) + 22, label, ha="center", fontsize=13,
             fontweight="bold")
+
+    # Размерные линии: диаметры втулки/корпуса на входе в СА и на выходе из РК, осевая ширина СА и РК
+    dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
+    off = 0.14 * r_ca_tip
+    _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub:.0f}", -1)
+    _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip:.0f}", -1)
+    _dim_diam(ax, z_rk_out, z_rk_out + dx1, r_rk_hub_out, f"⌀{D_rk_hub:.0f}", 1)
+    _dim_diam(ax, z_rk_out, z_rk_out + dx2, r_rk_tip_out, f"⌀{D_rk_tip:.0f}", 1)
+    _dim_width(ax, z_ca_in, z_ca_out, r_ca_hub, r_ca_hub, r_ca_hub - off, f"S={S_sa:.0f}")
+    _dim_width(ax, z_rk_in, z_rk_out, r_ca_hub, r_rk_hub_out, r_rk_hub_out - off, f"S={S_rk:.0f}")
+    _dim_width(ax, z_ca_out, z_gap_out, r_ca_hub, r_ca_hub, r_ca_hub - 2.1 * off, f"зазор={axial_gap:.0f}")
+
     return z_ca_in, r_ca_hub, r_ca_tip, z_rk_out, r_rk_hub_out, r_rk_tip_out
 
 
 def label_gap(ax, x0, x1, y, text):
-    """Текстовая подпись условного зазора между узлами (без отрисовки переходного канала)."""
-    ax.text((x0 + x1) / 2, y, text, ha="center", fontsize=11, fontweight="bold", style="italic")
+    """Текстовая подпись условного зазора между узлами (без отрисовки переходного канала).
+    va="top" — точка y задаёт верх текстового блока, чтобы многострочная подпись росла вниз."""
+    ax.text((x0 + x1) / 2, y, text, ha="center", va="top", fontsize=11, fontweight="bold", style="italic")
 
 
 def main():
@@ -148,26 +191,34 @@ def main():
 
     x_in_c, hub_in_c, tip_in_c, x_out_c, hub_out_c, tip_out_c = draw_compressor(ax, r, 0.0)
 
+    # Верхняя граница по радиусу известна заранее — подписи зазоров размещаются у неё, выше всех
+    # размерных линий диаметров (те не поднимаются выше макс. радиуса узлов) во избежание наложения
+    r_max = max(tip_out_c, tvd["D_sa"] / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
+    y_label = r_max * 0.85
+
     x_ks_end = x_out_c + GAP_KS
-    label_gap(ax, x_out_c, x_ks_end, tip_out_c * 0.4, "КС\n(противоточная,\nсхематично)")
+    label_gap(ax, x_out_c, x_ks_end, y_label, "КС\n(противоточная,\nсхематично)")
 
     axial_gap_tvd = 0.25 * tvd["S_rk"]
     (x_in_t, hub_in_t, tip_in_t, x_out_t, hub_out_t, tip_out_t) = draw_axial_turbine(
         ax, x_ks_end, tvd, axial_gap_tvd, "ТВД")
 
     x_mid_end = x_out_t + GAP_MID
-    label_gap(ax, x_out_t, x_mid_end, tip_out_t * 0.5, "переходной\nканал")
+    label_gap(ax, x_out_t, x_mid_end, y_label, "переходной\nканал")
 
     axial_gap_ct = 0.25 * ct["S_rk"]
     (x_in_s, hub_in_s, tip_in_s, x_out_s, hub_out_s, tip_out_s) = draw_axial_turbine(
         ax, x_mid_end, ct, axial_gap_ct, "СТ (свободная турбина)")
 
     x_total = x_out_s
-    ax.plot([-0.03 * x_total, x_total * 1.03], [0, 0], "k-.", lw=0.9)
+    # Запас под размерные линии диаметров на входе в ЦБК (слева) и на выходе из СТ (справа) —
+    # те же формулы dx2, что и в draw_compressor/draw_axial_turbine
+    x_left = -(0.34 * (r["D1t"] / 2) + 12)
+    x_right = x_total + 0.34 * (ct["D_sa"] / 2) + 12
+    ax.plot([x_left, x_right], [0, 0], "k-.", lw=0.9)
 
-    r_max = max(tip_out_c, tvd["D_sa"] / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
     ax.set_aspect("equal")
-    ax.set_xlim(-0.03 * x_total, x_total * 1.03)
+    ax.set_xlim(x_left, x_right)
     ax.set_ylim(-15, r_max)
     ax.set_xlabel("Осевая координата, мм (контуры узлов — в масштабе; расстояния между узлами — условные)")
     ax.set_ylabel("Радиус, мм")

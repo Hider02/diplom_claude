@@ -143,6 +143,25 @@ def plot_velocity_triangles(c_1, alpha_1_rad, w_1, beta_1_rad,
     print("=" * 70)
 
 
+def _dim_diam(ax, x_block, x_dim, r, label, side):
+    """Размерная линия диаметра: от оси (y=0) до поверхности (y=r), с линией-выноской от контура.
+    side = -1 (линия слева от узла) или +1 (справа) — определяет, куда сдвинута подпись."""
+    ax.plot([x_block, x_dim], [r, r], ':', color='dimgray', lw=0.7)
+    ax.annotate('', xy=(x_dim, r), xytext=(x_dim, 0),
+                arrowprops=dict(arrowstyle='<->', color='dimgray', lw=0.9))
+    ax.text(x_dim + side * 0.0035, r / 2, label, rotation=90, ha='center', va='center', fontsize=7.5,
+            color='dimgray')
+
+
+def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
+    """Размерная линия осевого размера (ширина СА/РК или зазор между ними), с выносками от контура."""
+    ax.plot([x0, x0], [y0, y_dim], ':', color='dimgray', lw=0.7)
+    ax.plot([x1, x1], [y1, y_dim], ':', color='dimgray', lw=0.7)
+    ax.annotate('', xy=(x1, y_dim), xytext=(x0, y_dim),
+                arrowprops=dict(arrowstyle='<->', color='dimgray', lw=0.9))
+    ax.text((x0 + x1) / 2, y_dim, label, ha='center', va='top', fontsize=7.5, color='dimgray')
+
+
 def plot_meridional_section(S_ca, S_rk,
                             D_ca_hub, D_ca_tip,  # СА (втулка и корпус)
                             D_rk_hub, D_rk_tip,  # РК (втулка и корпус на выходе)
@@ -210,6 +229,18 @@ def plot_meridional_section(S_ca, S_rk,
     ax.text(z_rk_in + S_rk / 2, (r_rk_hub_in + r_rk_tip_in) / 2, 'РК', ha='center', va='center', fontsize=12,
             fontweight='bold', color='darkred')
 
+    # 7b. Размерные линии: диаметры втулки/корпуса на входе в СА и на выходе из РК,
+    # осевая ширина СА и РК, осевой зазор между ними
+    dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
+    off = 0.12 * r_ca_tip
+    _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub * 1000:.0f}", -1)
+    _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip * 1000:.0f}", -1)
+    _dim_diam(ax, z_rk_out, z_rk_out + dx1, r_rk_hub_out, f"⌀{D_rk_hub * 1000:.0f}", 1)
+    _dim_diam(ax, z_rk_out, z_rk_out + dx2, r_rk_tip_out, f"⌀{D_rk_tip * 1000:.0f}", 1)
+    _dim_width(ax, z_ca_in, z_ca_out, r_ca_hub, r_ca_hub, r_ca_hub - off, f"S={S_ca * 1000:.0f}")
+    _dim_width(ax, z_rk_in, z_rk_out, r_rk_hub_in, r_rk_hub_out, r_rk_hub_out - off, f"S={S_rk * 1000:.0f}")
+    _dim_width(ax, z_ca_out, z_gap_out, r_ca_hub, r_ca_hub, r_ca_hub - 2.1 * off, f"зазор={axial_gap * 1000:.1f}")
+
     # 8. Настройки графика
     ax.set_xlabel('Осевая координата Z, м', fontsize=12)
     ax.set_ylabel('Радиус R, м', fontsize=12)
@@ -219,8 +250,10 @@ def plot_meridional_section(S_ca, S_rk,
     ax.legend(loc='upper right')
 
     all_r = [r_ca_hub, r_ca_tip, r_rk_hub_in, r_rk_tip_in, r_rk_hub_out, r_rk_tip_out]
-    ax.set_xlim(z_ca_in - 0.03, z_rk_out + 0.03)
-    ax.set_ylim(min(all_r) - 0.015, max(all_r) + 0.015)
+    y_dim_bottom = r_ca_hub - 2.1 * off
+    # Диаметры размерены от оси (y=0) — нижняя граница должна включать 0, а не только контур узла
+    ax.set_xlim(z_ca_in - dx2 - 0.010, z_rk_out + dx2 + 0.010)
+    ax.set_ylim(min(0.0, y_dim_bottom) - 0.010, max(all_r) + 0.015)
 
     plt.tight_layout()
     plt.show()
