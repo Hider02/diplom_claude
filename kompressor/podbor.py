@@ -24,7 +24,6 @@ BOUNDS = dict(
     beta2l=(45.0, 65.0),
     z_main=(11, 17),
     cr_ratio=(0.70, 1.00),
-    D3_D2=(1.06, 1.15),
     b3_b2=(0.80, 1.00),
     Rb_b3=(1.5, 3.0),
     AR_bend=(1.0, 1.2),
@@ -40,7 +39,9 @@ def violation(r):
 
 
 def evaluate(pik, G, x):
-    x = dict(x, z_split=x["z_main"])
+    # D3/D2 не подбирается: высота радиального диффузора задана стыковкой с противоточной КС
+    # (kamera_sgoraniya/podbor_diffuzor.py)
+    x = dict(x, z_split=x["z_main"], D3_D2=t.KOMP["D3_D2"])
     try:
         r = compressor(pik, G, t.P1, t.T1, **x)
     except (ValueError, ZeroDivisionError, OverflowError, TypeError):
@@ -74,7 +75,7 @@ def optimize_design(pik, G, n_random=300, n_refine=8, seed=1):
                     best_x, best_f, best_r, improved = x, f, r, True
         if not improved:
             break
-    return dict(best_x, z_split=best_x["z_main"]), best_r
+    return dict(best_x, z_split=best_x["z_main"], D3_D2=t.KOMP["D3_D2"]), best_r
 
 
 if __name__ == "__main__":

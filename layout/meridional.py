@@ -4,13 +4,15 @@
 
 Геометрия узлов берётся из уже существующих расчётов без их изменения:
   - ЦБК: kompressor/cbk.py (через termo/termodynamiks.py, где результат уже посчитан как t.komp);
+  - КС:  kamera_sgoraniya/mitrofanov.py (противоточная, рис.18 Митрофанова) — стыкуется с выходом
+    осевого ЛД ЦБК и входом в СА ТВД по втулочным и наружным диаметрам; ТВД стоит под жаровой трубой;
   - ТВД: turbine/gasdynamiks.py;
   - СТ:  free_turbine/gasdynamiks.py.
 Все три модуля при импорте сами печатают протокол расчёта и строят свои графики — здесь их собственные
 print и plt.show() временно подавляются, чтобы не открывать лишние окна и не засорять вывод.
 
-Расстояния между узлами (длина КС и переходного канала) заданы условно — по задаче важны только
-радиальные размеры (они взяты из расчёта без изменений), а не реальная компоновка по длине.
+Положение КС и ТВД по оси следует из расчёта КС (вход — сразу за ЛД ЦБК, СА ТВД — в плоскости выхода
+газосборника); условно задана только длина переходного канала ТВД → СТ.
 
 Запуск из корня проекта: python layout/meridional.py
 Результат: layout/meridional_layout.png (и окно, если доступен интерактивный backend).
@@ -23,13 +25,18 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
+from kamera_sgoraniya.plot import draw_combustor
+
 MM = 1000.0  # перевод м -> мм для всех расчётных величин ниже
 
-# Условные (не из расчёта) осевые зазоры между узлами, мм — только чтобы разнести блоки на рисунке.
-# КС принята противоточной: поток разворачивается внутри жаровой трубы, поэтому по факту КС не растягивает
-# тракт компрессор-турбина так, как показал бы прямоточный вариант — зазор здесь взят небольшим.
-GAP_KS = 60.0      # камера сгорания (противоточная, схематично)
-GAP_MID = 80.0     # переходной канал между ТВД и СТ
+# Условная (не из расчёта) длина переходного канала между ТВД и СТ, мм — только чтобы разнести блоки.
+GAP_MID = 80.0
+
+
+def scale_komp(komp):
+    """Геометрия ЦБК в мм (остальные величины — без изменений)."""
+    scale_keys = {"S", "b2", "b3", "h4", "D1h", "D1t", "D2", "D3", "D4m", "Rb", "h5", "L_ld"}
+    return {k: (v * MM if k in scale_keys else v) for k, v in komp.items()}
 
 
 def _get_geometry():
@@ -45,19 +52,19 @@ def _get_geometry():
     finally:
         plt.show = _show
         plt.close("all")
+    from kamera_sgoraniya.main import compute
+    ks = compute(t, tvd)
 
-    komp = t.komp
-    scale_keys = {"S", "b2", "b3", "h4", "D1h", "D1t", "D2", "D3", "D4m", "Rb", "h5"}
-    r = {k: (v * MM if k in scale_keys else v) for k, v in komp.items()}
+    r = scale_komp(t.komp)
 
     turb = dict(D_sa=tvd.D_sa * MM, d_sa=tvd.d_sa * MM, D_rk=tvd.D_rk * MM, d_rk=tvd.d_rk * MM,
                 S_sa=tvd.S_sa * MM, S_rk=tvd.S_rk * MM, D_sr=tvd.D_sr * MM)
     st = dict(D_sa=ct.D_sa * MM, d_sa=ct.d_sa * MM, D_rk=ct.D_rk * MM, d_rk=ct.d_rk * MM,
               S_sa=ct.S_sa * MM, S_rk=ct.S_rk * MM, D_sr=ct.D_sr * MM)
-    return r, turb, st
+    return r, ks, turb, st
 
 
-def draw_compressor(ax, r, x0):
+def draw_compressor(ax, r, x0, out_dims=True):
     """Меридиональное сечение ЦБК (копия геометрии kompressor/plot.py:plot_meridional, сдвинутая на x0).
     Возвращает (x_in, hub_in, tip_in, x_out, hub_out, tip_out)."""
     S, b2, b3, h4 = r["S"], r["b2"], r["b3"], r["h4"]
@@ -103,8 +110,9 @@ def draw_compressor(ax, r, x0):
     off = 0.12 * r1
     _dim_diam(ax, x0, x0 - dx1, r_vt, f"⌀{2 * r_vt:.0f}", -1)
     _dim_diam(ax, x0, x0 - dx2, r1, f"⌀{2 * r1:.0f}", -1)
-    _dim_diam(ax, x_out, x_out + dx1, r5_in, f"⌀{2 * r5_in:.0f}", 1)
-    _dim_diam(ax, x_out, x_out + dx2, r5_out, f"⌀{2 * r5_out:.0f}", 1)
+    if out_dims:  # при стыковке с КС диаметры выхода ЛД проставляет КС (они её вход)
+        _dim_diam(ax, x_out, x_out + dx1, r5_in, f"⌀{2 * r5_in:.0f}", 1)
+        _dim_diam(ax, x_out, x_out + dx2, r5_out, f"⌀{2 * r5_out:.0f}", 1)
     _dim_width(ax, x0, x0 + S, r1, r2, r2 + off, f"S={S:.0f}")
     _dim_width(ax, x4, x_out, r4 + h4 / 2, r4 + h4 / 2, r4 + h4 / 2 + off, f"L={L_ld:.0f}")
 
@@ -130,7 +138,7 @@ def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
     ax.text((x0 + x1) / 2, y_dim, label, ha="center", va="top", fontsize=7.5, color="dimgray")
 
 
-def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral"):
+def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral", in_dims=True):
     """Меридиональное сечение осевой ступени СА+РК (копия geometрии turbine/plot_turb.py:plot_meridional_section,
     сдвинутая на x0). Возвращает (x_in, hub_in, tip_in, x_out, hub_out, tip_out)."""
     S_sa, S_rk = geo["S_sa"], geo["S_rk"]
@@ -167,8 +175,9 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
     # Размерные линии: диаметры втулки/корпуса на входе в СА и на выходе из РК, осевая ширина СА и РК
     dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
     off = 0.14 * r_ca_tip
-    _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub:.0f}", -1)
-    _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip:.0f}", -1)
+    if in_dims:  # у ТВД диаметры входа в СА проставляет КС (они её выход)
+        _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub:.0f}", -1)
+        _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip:.0f}", -1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx1, r_rk_hub_out, f"⌀{D_rk_hub:.0f}", 1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx2, r_rk_tip_out, f"⌀{D_rk_tip:.0f}", 1)
     _dim_width(ax, z_ca_in, z_ca_out, r_ca_hub, r_ca_hub, r_ca_hub - off, f"S={S_sa:.0f}")
@@ -185,26 +194,30 @@ def label_gap(ax, x0, x1, y, text):
 
 
 def main():
-    r, tvd, ct = _get_geometry()
+    r, ks, tvd, ct = _get_geometry()
 
     fig, ax = plt.subplots(figsize=(16, 7))
 
-    x_in_c, hub_in_c, tip_in_c, x_out_c, hub_out_c, tip_out_c = draw_compressor(ax, r, 0.0)
+    x_in_c, hub_in_c, tip_in_c, x_out_c, hub_out_c, tip_out_c = draw_compressor(ax, r, 0.0, out_dims=False)
 
     # Верхняя граница по радиусу известна заранее — подписи зазоров размещаются у неё, выше всех
     # размерных линий диаметров (те не поднимаются выше макс. радиуса узлов) во избежание наложения
-    r_max = max(tip_out_c, tvd["D_sa"] / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
+    r_max = max(tip_out_c, ks["D_ksn"] * MM / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
     y_label = r_max * 0.85
 
-    x_ks_end = x_out_c + GAP_KS
-    label_gap(ax, x_out_c, x_ks_end, y_label, "КС\n(противоточная,\nсхематично)")
+    # КС: вход — выход ЛД ЦБК (x_out_c), СА ТВД — в плоскости выхода газосборника, под жаровой трубой
+    c = draw_combustor(ax, ks, x_out_c)
+    x_ks_end = c["x_end"]
+    ax.text((x_out_c + x_ks_end) / 2, ks["D_ksn"] * MM / 2 + 36, "КС (противоточная)", ha="center",
+            fontsize=13, fontweight="bold")
 
     axial_gap_tvd = 0.25 * tvd["S_rk"]
     (x_in_t, hub_in_t, tip_in_t, x_out_t, hub_out_t, tip_out_t) = draw_axial_turbine(
-        ax, x_ks_end, tvd, axial_gap_tvd, "ТВД")
+        ax, c["xc"], tvd, axial_gap_tvd, "ТВД", in_dims=False)
 
-    x_mid_end = x_out_t + GAP_MID
-    label_gap(ax, x_out_t, x_mid_end, y_label, "переходной\nканал")
+    x_mid_start = max(x_out_t, x_ks_end + 70)  # правее размерных линий КС
+    x_mid_end = x_mid_start + GAP_MID
+    label_gap(ax, x_mid_start, x_mid_end, y_label, "переходной\nканал")
 
     axial_gap_ct = 0.25 * ct["S_rk"]
     (x_in_s, hub_in_s, tip_in_s, x_out_s, hub_out_s, tip_out_s) = draw_axial_turbine(
@@ -220,7 +233,7 @@ def main():
     ax.set_aspect("equal")
     ax.set_xlim(x_left, x_right)
     ax.set_ylim(-15, r_max)
-    ax.set_xlabel("Осевая координата, мм (контуры узлов — в масштабе; расстояния между узлами — условные)")
+    ax.set_xlabel("Осевая координата, мм (в масштабе; условна только длина переходного канала ТВД → СТ)")
     ax.set_ylabel("Радиус, мм")
     ax.set_title("Меридиональная схема тракта: ЦБК → КС → ТВД → СТ (общий масштаб по радиусу)",
                 fontsize=13, fontweight="bold")
@@ -238,6 +251,8 @@ def main():
     print(f"{'ЦБК: выход РК (D2)':<28} | {'-':>8} | {'-':>8} | {r['D2']:>8.1f}")
     print(f"{'ЦБК: выход БЛД (D3)':<28} | {'-':>8} | {'-':>8} | {r['D3']:>8.1f}")
     print(f"{'ЦБК: выход осевого ЛД':<28} | {2 * hub_out_c:>8.1f} | {2 * tip_out_c:>8.1f} | {r['D4m']:>8.1f}")
+    print(f"{'КС: жаровая труба / корпус':<28} | {ks['D_zhtr_vn'] * MM:>8.1f} | {ks['D_ksn'] * MM:>8.1f} | "
+          f"{ks['D_zhtr_sr'] * MM:>8.1f}")
     print(f"{'ТВД: вход СА':<28} | {tvd['d_sa']:>8.1f} | {tvd['D_sa']:>8.1f} | {tvd['D_sr']:>8.1f}")
     print(f"{'ТВД: выход РК':<28} | {tvd['d_rk']:>8.1f} | {tvd['D_rk']:>8.1f} | {'-':>8}")
     print(f"{'СТ: вход СА':<28} | {ct['d_sa']:>8.1f} | {ct['D_sa']:>8.1f} | {ct['D_sr']:>8.1f}")

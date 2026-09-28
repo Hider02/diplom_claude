@@ -301,7 +301,9 @@ def _stage(pik_target, G, p01, T01, u2, p):
         a_in = a_out
     c5 = math.hypot(ca, cu)
     T5, p5 = _static(T0, p0, c5)
-    res.update(rows=rows, T05=T0, p05=p0, c5=c5, h5=A_in * p["AR_ld"] / (2 * math.pi * r4))
+    # Осевая длина ЛД (для компоновки): венцы хордой 1,3·h4 с зазорами 0,4·h4 — как на схемах kompressor/plot.py
+    L_ld = n_rows * 1.3 * h4 + (n_rows + 1) * 0.4 * h4
+    res.update(rows=rows, T05=T0, p05=p0, c5=c5, h5=A_in * p["AR_ld"] / (2 * math.pi * r4), L_ld=L_ld)
 
     pi_calc = p0 / p01
     H = cp * T01 * (pi_calc ** ((k - 1) / k) - 1)
