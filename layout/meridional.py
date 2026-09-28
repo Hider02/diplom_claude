@@ -114,6 +114,9 @@ def draw_compressor(ax, r, x0, out_dims=True):
         _dim_diam(ax, x_out, x_out + dx1, r5_in, f"⌀{2 * r5_in:.0f}", 1)
         _dim_diam(ax, x_out, x_out + dx2, r5_out, f"⌀{2 * r5_out:.0f}", 1)
     _dim_width(ax, x0, x0 + S, r1, r2, r2 + off, f"S={S:.0f}")
+    # Сечение 2 (выход РК): радиальный размер D2 — по оси выходной кромки, ширина лопатки b2 — у D2
+    _dim_diam(ax, x_c, x_c, r2, f"⌀{2 * r2:.0f} (D2)", -1)
+    _dim_narrow(ax, x0 + S - b2, x0 + S, r2, 1.2 * b2, f"b2={b2:.1f}")
     _dim_width(ax, x4, x_out, r4 + h4 / 2, r4 + h4 / 2, r4 + h4 / 2 + off, f"L={L_ld:.0f}")
 
     return x0, r_vt, r1, x_out, r5_in, r5_out
@@ -127,6 +130,14 @@ def _dim_diam(ax, x_block, x_dim, r, label, side):
                 arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.9))
     ax.text(x_dim + side * 3.5, r / 2, label, rotation=90, ha="center", va="center", fontsize=7.5,
             color="dimgray")
+
+
+def _dim_narrow(ax, x0, x1, y, gap, label):
+    """Размерная линия малого осевого размера (ширина b2): стрелки снаружи, направлены к выносным точкам."""
+    ax.plot([x0 - gap, x1 + gap], [y, y], "-", color="dimgray", lw=0.7)
+    for xa, xb in ((x0 - gap, x0), (x1 + gap, x1)):
+        ax.annotate("", xy=(xb, y), xytext=(xa, y), arrowprops=dict(arrowstyle="-|>", color="dimgray", lw=0.9))
+    ax.text(x0 - gap, y, label + " ", ha="right", va="center", fontsize=7.5, color="dimgray")
 
 
 def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
