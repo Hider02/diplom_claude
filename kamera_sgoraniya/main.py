@@ -1,10 +1,11 @@
 """
-Расчёт противоточной камеры сгорания, увязанный с уже выполненными расчётами ЦБК и ТВД:
-  - вход в КС — сечение за осевым ЛД компрессора (kompressor/cbk.py, через termo/termodynamiks.py):
-    втулочный D4m − h5 и наружный D4m + h5 диаметры; радиальный диффузор ЦБК поднят так, что ЛД выходит
-    прямо в наружный канал КС (D3/D2 — kamera_sgoraniya/podbor_diffuzor.py);
-  - выход из КС — сечение на входе в СА ТВД (turbine/gasdynamiks.py): втулочный d_sa и наружный D_sa.
-Методика — Митрофанов, books/Mitrofanov.pdf, с.48…57, рис.18 (см. kamera_sgoraniya/mitrofanov.py).
+Расчёт петлевой (противоточной) камеры сгорания по Мингазову (kamera_sgoraniya/mingazov.py, основная
+методика) со сравнительной проверкой по Митрофанову (kamera_sgoraniya/mitrofanov.py), увязанный с
+расчётами ЦБК и ТВД:
+  - вход в КС — выход осевого ЛД компрессора (kompressor/cbk.py, через termo/termodynamiks.py):
+    втулочный D4m − h5 и наружный D4m + h5 диаметры; радиальный диффузор ЦБК поднят так, что диффузор КС
+    выходит в наружный канал над ЖТ (D3/D2 — kamera_sgoraniya/podbor_diffuzor.py);
+  - выход из КС — вход в СА ТВД (turbine/gasdynamiks.py): втулочный d_sa и наружный D_sa.
 
 Запуск из корня проекта: python kamera_sgoraniya/main.py
 """
@@ -14,7 +15,8 @@ import sys
 
 import matplotlib.pyplot as plt
 
-from kamera_sgoraniya import mitrofanov as ks
+from kamera_sgoraniya import mingazov as mg
+from kamera_sgoraniya import mitrofanov as mt
 
 MM = 1000.0
 
@@ -24,11 +26,11 @@ def compute(t, tvd, komp=None, **params):
     komp — другой вариант расчёта ЦБК (для подбора диффузора, см. podbor_diffuzor.py)."""
     komp = komp or t.komp
     diff = dict(r3=komp["D3"] / 2, b3=komp["b3"], Rb=komp["Rb"], h4=komp["h4"], L_ld=komp["L_ld"])
-    return ks.combustor(
-        G_v=t.g_v * t.v_ks,  # расход воздуха в КС (за вычетом отбора на нужды ЛА)
-        P_k=t.P2, T_k=t.T2, T_z=t.T_g, alpha=t.alpha, L_o=t.Km0,
+    return mg.combustor(
+        G_k=t.g_v * t.v_ks,  # расход воздуха в КС (за вычетом отбора на нужды ЛА)
+        P_k=t.P2, T_k=t.T2, T_g=t.T_g, alpha=t.alpha, L_o=t.Km0, sigma_ks=t.sigma_ks,
         D_k_vn=komp["D4m"] - komp["h5"], D_k_n=komp["D4m"] + komp["h5"],
-        D_vyh_vn=tvd.d_sa, D_vyh_n=tvd.D_sa, diff=diff, **params)
+        D_t_vn=tvd.d_sa, D_t_n=tvd.D_sa, diff=diff, **params)
 
 
 def turbine_mm(tvd):
@@ -49,18 +51,18 @@ def main():
     plt.close("all")
 
     r = compute(t, tvd)
-    ks.print_report(r)
+    mg.print_report(r)
+    mt.print_check(mt.check(r))
 
     g, tr, komp = r["geo"], turbine_mm(tvd), t.komp
     L_tvd = tr["S_sa"] + 0.25 * tr["S_rk"] + tr["S_rk"]
     print("\n─── Согласование с ЦБК и ТВД ───")
     print(f"  ЦБК: радиальный диффузор до D3 = {komp['D3'] * MM:.1f} мм (D3/D2 = {t.KOMP['D3_D2']}), колено, "
-          f"осевой ЛД ⌀{r['D_k_vn'] * MM:.1f}/⌀{r['D_k_n'] * MM:.1f} мм → малый диффузор → наружный канал КС")
-    print(f"  Корпус КС D_ксн = {r['D_ksn'] * MM:.1f} мм = наружная стенка малого диффузора за ЛД ЦБК")
+          f"осевой ЛД ⌀{r['D_k_vn'] * MM:.1f}/⌀{r['D_k_n'] * MM:.1f} мм (AR_ЛД = {t.KOMP['AR_ld']}) → диффузор КС "
+          f"→ наружный канал над ЖТ")
     print(f"  ТВД, вход СА: ⌀{tr['d_sa']:.1f}/⌀{tr['D_sa']:.1f} мм → выход газосборника (стык по обоим диаметрам)")
-    print(f"  Осевая длина ступени ТВД (СА + зазор + РК) {L_tvd:.1f} мм, место под жаровой трубой "
-          f"{g['L_under'] * MM:.1f} мм → " + ("ступень целиком под КС" if L_tvd <= g["L_under"] * MM
-                                               else "ступень выходит за задний торец КС"))
+    print(f"  Осевая длина ступени ТВД (СА + зазор + РК) {L_tvd:.1f} мм, место под ЖТ {g['L_under'] * MM:.1f} мм → "
+          + ("ступень целиком под КС" if L_tvd <= g["L_under"] * MM else "ступень выходит за задний торец КС"))
 
     ksplot.plot_combustor(r, komp, tr)
 

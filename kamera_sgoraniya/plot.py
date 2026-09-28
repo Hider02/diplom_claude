@@ -1,7 +1,6 @@
 """
-Визуализация меридионального сечения противоточной КС по рис.18 методики Митрофанова
-(books/Mitrofanov.pdf, с.49) и чертежу реального двигателя books/гг.png; контур —
-kamera_sgoraniya/mitrofanov.py:layout().
+Визуализация меридионального сечения петлевой (противоточной) КС по Мингазову (рис. 8.3,
+books/Мингазов.pdf) и чертежу реального двигателя books/гг.png; контур — kamera_sgoraniya/mingazov.py:layout().
 
 draw_combustor() рисует КС на уже созданной оси со сдвигом x0 = выход осевого ЛД ЦБК (используется и
 здесь, и в общей схеме тракта layout/meridional.py); plot_combustor() — отдельный рисунок
@@ -28,15 +27,15 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
     xc, xd, x_end, x_d1, x_back = X(g["x_c"]), X(g["x_dome"]), X(g["x_end"]), X(g["x_d1"]), X(g["x_back"])
     hub_x = np.array([X(p[0] * MM) for p in r["geo"]["hub"]])
     hub_r = np.array([p[1] * MM for p in r["geo"]["hub"]])
-    h_zh, r_zh_sr = r["h_zh"] * MM, r["D_zhtr_sr"] / 2 * MM
+    h_zh, r_zh_sr = r["H_zh"] * MM, r["D_sr"] / 2 * MM
 
     out_x, out_r = _arc(xc, g["rc_o"], g["Ro"], 90, 270)  # наружная стенка газосборника: Джтрн → втулка СА
     in_x, in_r = _arc(xc, g["rc_i"], g["Ri"], 90, 270)  # внутренняя: Джтрвн → корпус СА
     dome_x, dome_r = _arc(xd, r_zh_sr, h_zh / 2, -90, 90)
 
-    # Малый «безотрывный» диффузор (пп.14…16)
+    # Безотрывный участок диффузора КС (Мингазов, п. 8.3), за ним — внезапное расширение до корпуса D_н
     ax.fill([x0, x_d1, x_d1, x0], [g["r_k_vn"], g["r_d1_vn"], g["r_d1_n"], g["r_k_n"]], facecolor="lightyellow",
-            edgecolor="black", lw=1.2, label="Малый диффузор КС (пп.14…16)")
+            edgecolor="black", lw=1.2, label="Диффузор КС (п. 8.3)")
 
     # Воздушная полость: наружный канал F_кк над жаровой трубой, за куполом вниз, внутренняя полость над ТВД,
     # спереди — полость между газосборником и задней стенкой диффузора ЦБК
@@ -59,7 +58,8 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
     ax.plot([xc, xd], [g["r_zh_vn"]] * 2, **k)
     ax.plot(dome_x, dome_r, **k)
     # корпус: наружный, задний торец, внутренний (= корпус СА ТВД)
-    ax.plot([x_d1, x_end, x_end, xc], [g["r_ksn"], g["r_ksn"], g["r_vyh_n"], g["r_vyh_n"]], color="black", lw=1.8)
+    ax.plot([x_d1, x_d1, x_end, x_end, xc], [g["r_d1_n"], g["r_ksn"], g["r_ksn"], g["r_vyh_n"], g["r_vyh_n"]],
+            color="black", lw=1.8)
     # задняя стенка радиального диффузора ЦБК (передняя стенка КС) и опора СА по втулке
     ax.plot([x_back, x_back, xc], [g["r3"], g["r_vyh_vn"], g["r_vyh_vn"]], color="black", lw=1.8)
     ax.plot([x0, x_d1], [g["r_k_vn"], g["r_d1_vn"]], **k)
@@ -73,7 +73,7 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
     arr = dict(arrowstyle="-|>", lw=1.3, mutation_scale=11)
     r_kk = (g["r_zh_n"] + g["r_ksn"]) / 2
     ax.annotate("", xy=(xd, r_kk), xytext=(x_d1 + 2, r_kk), arrowprops=dict(color="royalblue", **arr))
-    ax.annotate("", xy=(xd + h_zh / 2 + 0.6 * r["Delta"] * MM, r_zh_sr), xytext=(xd + 3, g["r_ksn"] - 1),
+    ax.annotate("", xy=(xd + h_zh / 2 + 0.6 * r["dl"] * MM, r_zh_sr), xytext=(xd + 3, g["r_ksn"] - 1),
                 arrowprops=dict(color="royalblue", connectionstyle="arc3,rad=-0.4", **arr))
     ax.annotate("", xy=(xc + 3, r_zh_sr), xytext=(xd - 3, r_zh_sr), arrowprops=dict(color="firebrick", **arr))
     ax.annotate("", xy=(xc + 2, (g["r_vyh_vn"] + g["r_vyh_n"]) / 2),
@@ -103,12 +103,12 @@ def _dimensions(ax, c):
     step = 8.0
     for i, (x_from, rr, name) in enumerate([
             (c["x0"], g["r_k_vn"], "D_к.вн"), (c["x0"], g["r_k_n"], "D_к.н"),
-            (xc, g["r_vyh_vn"], "D_вых.вн"), (x_end, g["r_vyh_n"], "D_вых.н"),
-            (xd, g["r_zh_vn"], "Джтрвн"), (xd, g["r_zh_n"], "Джтрн"), (x_end, g["r_ksn"], "D_ксн")]):
+            (xc, g["r_vyh_vn"], "D_т.вн"), (x_end, g["r_vyh_n"], "D_т.н"),
+            (xd, g["r_zh_vn"], "D_ж.вн"), (xd, g["r_zh_n"], "D_ж.н"), (x_end, g["r_ksn"], "D_н")]):
         _dim_diam(ax, x_from, x_end + step * (i + 1), rr, f"{name} ⌀{2 * rr:.0f}", 1)
     y_top = g["r_ksn"] + 12
     _dim_len(ax, c["x_back"], x_end, y_top + 16, f"L_кс = {x_end - c['x_back']:.0f}")
-    _dim_len(ax, xc, xd, y_top, f"l_зг = {xd - xc:.0f}")
+    _dim_len(ax, xc, xd, y_top, f"L_п.з+L_з.д = {xd - xc:.0f}")
 
 
 def plot_combustor(r, komp, tvd):
@@ -119,7 +119,7 @@ def plot_combustor(r, komp, tvd):
     fig, ax = plt.subplots(figsize=(13, 8))
     _, _, _, x_out, _, _ = draw_compressor(ax, scale_komp(komp), 0.0, out_dims=False)
     c = draw_combustor(ax, r, x_out)
-    draw_axial_turbine(ax, c["xc"], tvd, 0.25 * tvd["S_rk"], "ТВД", in_dims=False)
+    draw_axial_turbine(ax, c["xc"], tvd, 0.25 * tvd["S_rk"], "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
     x_right = c["x_end"] + 70
     ax.plot([-40, x_right], [0, 0], "k-.", lw=0.9)
 
@@ -128,8 +128,8 @@ def plot_combustor(r, komp, tvd):
     ax.set_ylim(-5, c["g"]["r_ksn"] + 45)
     ax.set_xlabel("Осевая координата от входа в ЦБК, мм")
     ax.set_ylabel("Радиус, мм")
-    ax.set_title(f"ЦБК + противоточная КС + ТВД: D3 = {komp['D3'] * MM:.0f} мм, D_ксн = {r['D_ksn'] * MM:.0f} мм, "
-                 f"Джтрн/вн = {r['D_zhtr_n'] * MM:.0f}/{r['D_zhtr_vn'] * MM:.0f} мм", fontsize=12, fontweight="bold")
+    ax.set_title(f"ЦБК + петлевая КС (Мингазов) + ТВД: D3 = {komp['D3'] * MM:.0f} мм, D_н = {r['D_n'] * MM:.0f} мм, "
+                 f"D_ж.н/вн = {r['D_zh_n'] * MM:.0f}/{r['D_zh_vn'] * MM:.0f} мм", fontsize=12, fontweight="bold")
     ax.grid(True, linestyle=":", alpha=0.4)
     ax.legend(loc="upper left", fontsize=8)
     plt.tight_layout()

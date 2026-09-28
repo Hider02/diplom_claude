@@ -39,7 +39,7 @@ ETA_K_IZ_KOMPRESSORA = True
 eta_k_ocenka = 0.82        # Оценочный КПД ЦБК
 # Конструктивные параметры ЦБК (в пределах рекомендаций книги, подобраны kompressor/podbor.py)
 KOMP = dict(n_rpm=42691, nu_hub=0.3, k_D1=1.02, beta2l=56.013, z_main=11, z_split=11, cr_ratio=0.877,
-            D3_D2=1.578, b3_b2=0.848, Rb_b3=1.5, AR_bend=1.2, n_rows=4, sigma_ld=1.4, AR_ld=1.0)
+            D3_D2=1.357, b3_b2=0.848, Rb_b3=1.5, AR_bend=1.2, n_rows=4, sigma_ld=1.4, AR_ld=0.75)
 v_la = 0.03     # коэффициент отбора воздуха для ЛА
 
 #КС

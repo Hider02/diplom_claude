@@ -4,7 +4,7 @@
 
 Геометрия узлов берётся из уже существующих расчётов без их изменения:
   - ЦБК: kompressor/cbk.py (через termo/termodynamiks.py, где результат уже посчитан как t.komp);
-  - КС:  kamera_sgoraniya/mitrofanov.py (противоточная, рис.18 Митрофанова) — стыкуется с выходом
+  - КС:  kamera_sgoraniya/mingazov.py (петлевая, Мингазов п. 8.10, рис. 8.3) — стыкуется с выходом
     осевого ЛД ЦБК и входом в СА ТВД по втулочным и наружным диаметрам; ТВД стоит под жаровой трубой;
   - ТВД: turbine/gasdynamiks.py;
   - СТ:  free_turbine/gasdynamiks.py.
@@ -149,7 +149,8 @@ def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
     ax.text((x0 + x1) / 2, y_dim, label, ha="center", va="top", fontsize=7.5, color="dimgray")
 
 
-def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral", in_dims=True):
+def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral", in_dims=True,
+                       label_y=None):
     """Меридиональное сечение осевой ступени СА+РК (копия geometрии turbine/plot_turb.py:plot_meridional_section,
     сдвинутая на x0). Возвращает (x_in, hub_in, tip_in, x_out, hub_out, tip_out)."""
     S_sa, S_rk = geo["S_sa"], geo["S_rk"]
@@ -180,8 +181,9 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
             color="darkblue")
     ax.text((z_rk_in + z_rk_out) / 2, r_rk_tip_out + 6, "РК", ha="center", fontsize=10, fontweight="bold",
             color="darkred")
-    ax.text((z_ca_in + z_rk_out) / 2, max(r_ca_tip, r_rk_tip_out) + 22, label, ha="center", fontsize=13,
-            fontweight="bold")
+    # label_y — высота подписи узла; по умолчанию над ступенью (для ТВД под КС подпись ставится ниже оси ступени)
+    ax.text((z_ca_in + z_rk_out) / 2, max(r_ca_tip, r_rk_tip_out) + 22 if label_y is None else label_y, label,
+            ha="center", fontsize=13, fontweight="bold")
 
     # Размерные линии: диаметры втулки/корпуса на входе в СА и на выходе из РК, осевая ширина СА и РК
     dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
@@ -213,18 +215,18 @@ def main():
 
     # Верхняя граница по радиусу известна заранее — подписи зазоров размещаются у неё, выше всех
     # размерных линий диаметров (те не поднимаются выше макс. радиуса узлов) во избежание наложения
-    r_max = max(tip_out_c, ks["D_ksn"] * MM / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
+    r_max = max(tip_out_c, ks["D_n"] * MM / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
     y_label = r_max * 0.85
 
     # КС: вход — выход ЛД ЦБК (x_out_c), СА ТВД — в плоскости выхода газосборника, под жаровой трубой
     c = draw_combustor(ax, ks, x_out_c)
     x_ks_end = c["x_end"]
-    ax.text((x_out_c + x_ks_end) / 2, ks["D_ksn"] * MM / 2 + 36, "КС (противоточная)", ha="center",
+    ax.text((x_out_c + x_ks_end) / 2, ks["D_n"] * MM / 2 + 36, "КС (петлевая)", ha="center",
             fontsize=13, fontweight="bold")
 
     axial_gap_tvd = 0.25 * tvd["S_rk"]
     (x_in_t, hub_in_t, tip_in_t, x_out_t, hub_out_t, tip_out_t) = draw_axial_turbine(
-        ax, c["xc"], tvd, axial_gap_tvd, "ТВД", in_dims=False)
+        ax, c["xc"], tvd, axial_gap_tvd, "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
 
     x_mid_start = max(x_out_t, x_ks_end + 70)  # правее размерных линий КС
     x_mid_end = x_mid_start + GAP_MID
@@ -262,8 +264,9 @@ def main():
     print(f"{'ЦБК: выход РК (D2)':<28} | {'-':>8} | {'-':>8} | {r['D2']:>8.1f}")
     print(f"{'ЦБК: выход БЛД (D3)':<28} | {'-':>8} | {'-':>8} | {r['D3']:>8.1f}")
     print(f"{'ЦБК: выход осевого ЛД':<28} | {2 * hub_out_c:>8.1f} | {2 * tip_out_c:>8.1f} | {r['D4m']:>8.1f}")
-    print(f"{'КС: жаровая труба / корпус':<28} | {ks['D_zhtr_vn'] * MM:>8.1f} | {ks['D_ksn'] * MM:>8.1f} | "
-          f"{ks['D_zhtr_sr'] * MM:>8.1f}")
+    print(f"{'КС: жаровая труба':<28} | {ks['D_zh_vn'] * MM:>8.1f} | {ks['D_zh_n'] * MM:>8.1f} | "
+          f"{ks['D_sr'] * MM:>8.1f}")
+    print(f"{'КС: корпус D_н':<28} | {'-':>8} | {ks['D_n'] * MM:>8.1f} | {'-':>8}")
     print(f"{'ТВД: вход СА':<28} | {tvd['d_sa']:>8.1f} | {tvd['D_sa']:>8.1f} | {tvd['D_sr']:>8.1f}")
     print(f"{'ТВД: выход РК':<28} | {tvd['d_rk']:>8.1f} | {tvd['D_rk']:>8.1f} | {'-':>8}")
     print(f"{'СТ: вход СА':<28} | {ct['d_sa']:>8.1f} | {ct['D_sa']:>8.1f} | {ct['D_sr']:>8.1f}")

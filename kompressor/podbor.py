@@ -29,8 +29,11 @@ BOUNDS = dict(
     AR_bend=(1.0, 1.2),
     n_rows=(3, 4),
     sigma_ld=(1.4, 2.0),
-    AR_ld=(1.0, 1.2),
 )
+# Не подбираются (берутся из termo/termodynamiks.py, KOMP): D3/D2 — высота радиального диффузора задана
+# стыковкой с петлевой КС (kamera_sgoraniya/podbor_diffuzor.py); AR_ld — сужение канала осевого ЛД задано
+# скоростью на выходе ЦБК W_к = 100…150 м/с (Мингазов, п. 8.2.1)
+FIXED = ("D3_D2", "AR_ld")
 
 
 def violation(r):
@@ -39,9 +42,7 @@ def violation(r):
 
 
 def evaluate(pik, G, x):
-    # D3/D2 не подбирается: высота радиального диффузора задана стыковкой с противоточной КС
-    # (kamera_sgoraniya/podbor_diffuzor.py)
-    x = dict(x, z_split=x["z_main"], D3_D2=t.KOMP["D3_D2"])
+    x = dict(x, z_split=x["z_main"], **{kk: t.KOMP[kk] for kk in FIXED})
     try:
         r = compressor(pik, G, t.P1, t.T1, **x)
     except (ValueError, ZeroDivisionError, OverflowError, TypeError):
@@ -75,7 +76,7 @@ def optimize_design(pik, G, n_random=300, n_refine=8, seed=1):
                     best_x, best_f, best_r, improved = x, f, r, True
         if not improved:
             break
-    return dict(best_x, z_split=best_x["z_main"], D3_D2=t.KOMP["D3_D2"]), best_r
+    return dict(best_x, z_split=best_x["z_main"], **{kk: t.KOMP[kk] for kk in FIXED}), best_r
 
 
 if __name__ == "__main__":
