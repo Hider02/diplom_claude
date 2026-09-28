@@ -19,15 +19,24 @@ def _arc(xc, rc, R, phi0, phi1, n=60):
     return xc + R * np.cos(phi), rc + R * np.sin(phi)
 
 
-def draw_combustor(ax, r, x0=0.0, dims=True):
-    """Меридиональное сечение противоточной КС на оси ax, x0 — выход осевого ЛД ЦБК, мм.
-    Возвращает словарь координат (мм) для стыковки с турбиной."""
+def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
+    """Меридиональное сечение петлевой (противоточной) КС на оси ax, x0 — выход осевого ЛД ЦБК, мм.
+    duct — переходный канал ТВД → СТ (free_turbine/perehod.py, м, координаты КС): скошенная задняя стенка
+    КС садится на его наружную стенку; без него — на корпус СА ТВД. Возвращает координаты (мм)."""
     g = {k: v * MM for k, v in r["geo"].items() if isinstance(v, float)}
     X = lambda v: x0 + v
     xc, xd, x_end, x_d1, x_back = X(g["x_c"]), X(g["x_dome"]), X(g["x_end"]), X(g["x_d1"]), X(g["x_back"])
     hub_x = np.array([X(p[0] * MM) for p in r["geo"]["hub"]])
     hub_r = np.array([p[1] * MM for p in r["geo"]["hub"]])
     h_zh, r_zh_sr = r["H_zh"] * MM, r["D_sr"] / 2 * MM
+    # Скошенная (45°) задняя стенка корпуса x + r = C и «пол» КС: корпус СА/РК ТВД и наружная стенка канала к СТ
+    x_top = X(g["x_top"])
+    if duct is not None:
+        floor_x = [X(duct["x_b"] * MM), X(duct["x_rk"] * MM), xc]
+        floor_r = [duct["r_b"] * MM, duct["r_rk_tip"] * MM, g["r_vyh_n"]]
+    else:
+        floor_x = [X(g["C_wall"] - g["r_vyh_n"]), xc]
+        floor_r = [g["r_vyh_n"], g["r_vyh_n"]]
 
     out_x, out_r = _arc(xc, g["rc_o"], g["Ro"], 90, 270)  # наружная стенка газосборника: Джтрн → втулка СА
     in_x, in_r = _arc(xc, g["rc_i"], g["Ri"], 90, 270)  # внутренняя: Джтрвн → корпус СА
@@ -39,9 +48,9 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
 
     # Воздушная полость: наружный канал F_кк над жаровой трубой, за куполом вниз, внутренняя полость над ТВД,
     # спереди — полость между газосборником и задней стенкой диффузора ЦБК
-    air_x = np.concatenate([[x_d1, x_d1, x_end, x_end, xc], in_x[::-1], [xd], dome_x, [xc], out_x,
+    air_x = np.concatenate([[x_d1, x_d1, x_top], floor_x, in_x[::-1], [xd], dome_x, [xc], out_x,
                             [x_back, x_back], hub_x, [x0]])
-    air_r = np.concatenate([[g["r_d1_vn"], g["r_ksn"], g["r_ksn"], g["r_vyh_n"], g["r_vyh_n"]], in_r[::-1],
+    air_r = np.concatenate([[g["r_d1_vn"], g["r_ksn"], g["r_ksn"]], floor_r, in_r[::-1],
                             [g["r_zh_vn"]], dome_r, [g["r_zh_n"]], out_r,
                             [g["r_vyh_vn"], g["r3"]], hub_r, [g["r_k_vn"]]])
     ax.fill(air_x, air_r, color="lightblue", alpha=0.45, edgecolor="none", label="Воздух КС (F_кк и полости)")
@@ -57,9 +66,8 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
     ax.plot([xc, xd], [g["r_zh_n"]] * 2, **k)
     ax.plot([xc, xd], [g["r_zh_vn"]] * 2, **k)
     ax.plot(dome_x, dome_r, **k)
-    # корпус: наружный, задний торец, внутренний (= корпус СА ТВД)
-    ax.plot([x_d1, x_d1, x_end, x_end, xc], [g["r_d1_n"], g["r_ksn"], g["r_ksn"], g["r_vyh_n"], g["r_vyh_n"]],
-            color="black", lw=1.8)
+    # корпус: наружный, скошенная задняя стенка, внутренний (= корпус ТВД и наружная стенка канала к СТ)
+    ax.plot([x_d1, x_d1, x_top] + floor_x, [g["r_d1_n"], g["r_ksn"], g["r_ksn"]] + floor_r, color="black", lw=1.8)
     # задняя стенка радиального диффузора ЦБК (передняя стенка КС) и опора СА по втулке
     ax.plot([x_back, x_back, xc], [g["r3"], g["r_vyh_vn"], g["r_vyh_vn"]], color="black", lw=1.8)
     ax.plot([x0, x_d1], [g["r_k_vn"], g["r_d1_vn"]], **k)
@@ -80,7 +88,7 @@ def draw_combustor(ax, r, x0=0.0, dims=True):
                 xytext=(xc - g["Ro"] * 0.9, g["rc_o"] - 0.3 * g["Ro"]),
                 arrowprops=dict(color="firebrick", connectionstyle="arc3,rad=0.4", **arr))
 
-    c = dict(xc=xc, xd=xd, x_end=x_end, x_back=x_back, x0=x0, g=g)
+    c = dict(xc=xc, xd=xd, x_end=floor_x[0], x_top=x_top, x_back=x_back, x0=x0, g=g)
     if dims:
         _dimensions(ax, c)
     return c
@@ -99,28 +107,32 @@ def _dim_len(ax, x0, x1, y, label):
 
 
 def _dimensions(ax, c):
-    g, xc, xd, x_end = c["g"], c["xc"], c["xd"], c["x_end"]
+    g, xc, xd, x_end, x_top = c["g"], c["xc"], c["xd"], c["x_end"], c["x_top"]
     step = 8.0
     for i, (x_from, rr, name) in enumerate([
             (c["x0"], g["r_k_vn"], "D_к.вн"), (c["x0"], g["r_k_n"], "D_к.н"),
             (xc, g["r_vyh_vn"], "D_т.вн"), (x_end, g["r_vyh_n"], "D_т.н"),
             (xd, g["r_zh_vn"], "D_ж.вн"), (xd, g["r_zh_n"], "D_ж.н"), (x_end, g["r_ksn"], "D_н")]):
-        _dim_diam(ax, x_from, x_end + step * (i + 1), rr, f"{name} ⌀{2 * rr:.0f}", 1)
+        _dim_diam(ax, min(x_from, x_top), x_top + step * (i + 1), rr, f"{name} ⌀{2 * rr:.0f}", 1)
     y_top = g["r_ksn"] + 12
     _dim_len(ax, c["x_back"], x_end, y_top + 16, f"L_кс = {x_end - c['x_back']:.0f}")
     _dim_len(ax, xc, xd, y_top, f"L_п.з+L_з.д = {xd - xc:.0f}")
 
 
-def plot_combustor(r, komp, tvd):
+def plot_combustor(r, komp, tvd, duct=None):
     """Отдельный рисунок ЦБК → противоточная КС → ТВД. komp — результат расчёта ЦБК (м),
     tvd — словарь размеров ТВД в мм (d_sa, D_sa, d_rk, D_rk, S_sa, S_rk)."""
-    from layout.meridional import draw_compressor, draw_axial_turbine, scale_komp
+    from layout.meridional import draw_compressor, draw_axial_turbine, scale_komp, draw_duct
 
     fig, ax = plt.subplots(figsize=(13, 8))
     _, _, _, x_out, _, _ = draw_compressor(ax, scale_komp(komp), 0.0, out_dims=False)
-    c = draw_combustor(ax, r, x_out)
+    c = draw_combustor(ax, r, x_out, duct=duct)
     draw_axial_turbine(ax, c["xc"], tvd, 0.25 * tvd["S_rk"], "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
-    x_right = c["x_end"] + 70
+    x_right = c["x_top"] + 8 * 8 + 15  # за размерными линиями КС
+    if duct is not None:
+        x_ct = draw_duct(ax, duct, x_out)
+        ax.text(x_ct + 2, duct["r_in_tip"] * MM, "→ СТ", fontsize=10, fontweight="bold", va="center")
+        x_right = max(x_right, x_ct + 20)
     ax.plot([-40, x_right], [0, 0], "k-.", lw=0.9)
 
     ax.set_aspect("equal")

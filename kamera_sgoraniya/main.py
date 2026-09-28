@@ -47,12 +47,16 @@ def main():
     with contextlib.redirect_stdout(io.StringIO()):
         import termo.termodynamiks as t
         import turbine.gasdynamiks as tvd
+        import free_turbine.gasdynamiks as ct
     plt.show = _show
     plt.close("all")
 
     r = compute(t, tvd)
     mg.print_report(r)
     mt.print_check(mt.check(r))
+    from free_turbine import perehod
+    duct = perehod.from_models(r, tvd, ct)
+    perehod.print_report(duct)
 
     g, tr, komp = r["geo"], turbine_mm(tvd), t.komp
     L_tvd = tr["S_sa"] + 0.25 * tr["S_rk"] + tr["S_rk"]
@@ -64,7 +68,7 @@ def main():
     print(f"  Осевая длина ступени ТВД (СА + зазор + РК) {L_tvd:.1f} мм, место под ЖТ {g['L_under'] * MM:.1f} мм → "
           + ("ступень целиком под КС" if L_tvd <= g["L_under"] * MM else "ступень выходит за задний торец КС"))
 
-    ksplot.plot_combustor(r, komp, tr)
+    ksplot.plot_combustor(r, komp, tr, duct)
 
 
 if __name__ == "__main__":

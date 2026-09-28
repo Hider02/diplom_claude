@@ -54,7 +54,10 @@ DEFAULTS = dict(
     m=0.3,  # относительная глубина проникновения струи 0,2…0,5
     mu_o=0.7,  # коэффициент расхода отверстий
     d_ozs_rel=1.5,  # d_озс/d_озг
-    h_s=0.001,  # высота щели пояса охлаждения, м (0,001…0,002)
+    # Пояса охлаждения (п. 8.6.7): рекомендуется 5…7 поясов со щелью h_s = 1…2 мм. При h_s = 1 мм площади
+    # F_охл хватает лишь на ~3 пояса, поэтому число поясов принимается не меньше n_ohl_min, а щель
+    # уменьшается до h_s = F_охл/(n·π·(D_ж.н + D_ж.вн)); щель не меньше h_s_min — по технологичности
+    h_s_max=0.001, n_ohl_min=5, h_s_min=0.0005,
     # Фронтовое устройство (п. 8.7)
     t_fr=0.5,  # относительный шаг фронтовых устройств (0,2…0,5)
     delta_z=0.001, n_z_bl=8, phi_z=60.0,  # толщина и число лопаток завихрителя, угол установки, град
@@ -213,10 +216,13 @@ def combustor(G_k, P_k, T_k, T_g, alpha, L_o, sigma_ks, D_k_vn, D_k_n, D_t_vn, D
     n_ozs_n = round(math.pi * D_zh_n / t_ozs)
     n_ozs_vn = n_ozs - n_ozs_n
     F_ohl = F_o * p["F_ohl"]
-    F_ohl1 = math.pi * (D_zh_n + D_zh_vn) * p["h_s"]  # 8.6.7
-    n_ohl = F_ohl / F_ohl1
+    n_ohl_1mm = F_ohl / (math.pi * (D_zh_n + D_zh_vn) * p["h_s_max"])  # 8.6.7 при щели h_s_max
+    n_ohl = min(max(math.ceil(n_ohl_1mm), p["n_ohl_min"]), 7)
+    h_s = F_ohl / (n_ohl * math.pi * (D_zh_n + D_zh_vn))
+    F_ohl1 = math.pi * (D_zh_n + D_zh_vn) * h_s
     r.update(q=q, W_gz=W_gz, d_eff=d_eff, d_ozg=d_ozg, n_ozg=n_ozg, t_o=t_o, n_ozg_n=n_ozg_n, n_ozg_vn=n_ozg_vn,
-             d_ozs=d_ozs, n_ozs=n_ozs, t_ozs=t_ozs, n_ozs_n=n_ozs_n, n_ozs_vn=n_ozs_vn, F_ohl1=F_ohl1, n_ohl=n_ohl)
+             d_ozs=d_ozs, n_ozs=n_ozs, t_ozs=t_ozs, n_ozs_n=n_ozs_n, n_ozs_vn=n_ozs_vn, F_ohl1=F_ohl1, n_ohl=n_ohl,
+             n_ohl_1mm=n_ohl_1mm, h_s=h_s)
 
     # ---------- 8.7. Головная часть ЖТ ----------
     F_fr = F_o * p["F_fr"]
@@ -280,7 +286,10 @@ def layout(r, diff):
     x_c = x_nose + Ro
     L_straight = r["L_pz"] + max(r["L_zd"], 0.0)
     x_dome = x_c + L_straight
-    x_end = x_dome + r["H_zh"] / 2 + r["dl"]
+    # Задняя стенка корпуса скошена под 45° (как на чертеже books/гг.png) и опирается на наружную стенку
+    # переходного канала ТВД → СТ: линия x + r = C_wall, отстоящая от купола на Δl (п. 8.3.9)
+    x_end = x_dome + (r["H_zh"] / 2 + r["dl"]) * math.sqrt(2)  # стенка на среднем радиусе ЖТ
+    C_wall = x_end + r["D_sr"] / 2
 
     # Наименьший радиальный зазор между стенкой диффузора ЦБК (колено, ЛД, диффузор КС) и наружной стенкой
     # газосборника / ЖТ
@@ -299,7 +308,8 @@ def layout(r, diff):
 
     return dict(r_k_vn=R(r["D_k_vn"]), r_k_n=R(r["D_k_n"]), r_d1_vn=R(r["D1_vn"]), r_d1_n=R(r["D1_n"]),
                 r_2vn=R(r["D2_vn"]), x_d1=r["L_d"], x_back=x_back, hub=hub, r3=diff["r3"], x_nose=x_nose,
-                rc_o=rc_o, Ro=Ro, rc_i=rc_i, Ri=Ri, x_c=x_c, x_dome=x_dome, x_end=x_end, L_under=x_end - x_c,
+                rc_o=rc_o, Ro=Ro, rc_i=rc_i, Ri=Ri, x_c=x_c, x_dome=x_dome, x_end=x_end, C_wall=C_wall, x_top=C_wall - R(r["D_n"]),
+                L_under=C_wall - r_t_n - x_c,
                 L_turn=math.pi * ((r["D_sr"] - r["D_t_sr"]) / 4), clear=clear,
                 r_vyh_vn=r_t_vn, r_vyh_n=r_t_n, r_zh_vn=r_zh_vn, r_zh_n=r_zh_n, r_ksn=R(r["D_n"]))
 
@@ -328,7 +338,11 @@ def _checks(r):
     _rng(w, "d_озг", r["d_ozg"], "d_ozg", fmt="{:.4f}", unit=" м")
     if r["t_o"] <= 2 * r["d_ozg"]:
         w.append(f"Шаг отверстий зоны горения t₀ = {r['t_o'] * 1000:.1f} мм ≤ 2d (п. 8.6.4) — уменьшите n_озг")
-    _rng(w, "Число поясов охлаждения", r["n_ohl"], "n_ohl", fmt="{:.1f}")
+    _rng(w, "Число поясов охлаждения", r["n_ohl"], "n_ohl", fmt="{:.0f}")
+    if r["h_s"] < p["h_s_max"]:
+        w.append(f"Щель поясов охлаждения h_s = {r['h_s'] * 1000:.2f} мм меньше рекомендуемых 1…2 мм (п. 8.6.7) — "
+                 f"уменьшена, чтобы получить {r['n_ohl']} поясов"
+                 + (f"; меньше {p['h_s_min'] * 1000:.1f} мм — технологически трудно" if r["h_s"] < p["h_s_min"] else ""))
     if 2 * r["R_nz"] > 2 * r["H_zh"]:
         w.append("Завихритель не помещается в головную часть ЖТ")
     if r["alpha_sr"] <= r["alpha_zg"]:
@@ -403,8 +417,9 @@ def print_report(r):
           f"({r['n_ozg_n']} по наружной + {r['n_ozg_vn']} по внутренней стенке), t₀ = {mm(r['t_o']):.1f} мм")
     print(f"  Смеситель: d_озс = {mm(r['d_ozs']):.1f} мм, n_озс = {r['n_ozs']} ({r['n_ozs_n']} + {r['n_ozs_vn']}), "
           f"шаг {mm(r['t_ozs']):.1f} мм")
-    print(f"  Охлаждение: пояс (щель h_s = {mm(p['h_s']):.1f} мм) {cm2(r['F_ohl1']):.1f} см², "
-          f"поясов n = {r['n_ohl']:.1f} → {math.ceil(r['n_ohl'])} (5…7)")
+    print(f"  Охлаждение: F_охл = {cm2(r['F_o'] * p['F_ohl']):.1f} см²; при щели {mm(p['h_s_max']):.0f} мм хватает на "
+          f"{r['n_ohl_1mm']:.1f} пояса → принято {r['n_ohl']} поясов (5…7) со щелью h_s = {mm(r['h_s']):.2f} мм, "
+          f"пояс {cm2(r['F_ohl1']):.1f} см²")
 
     print("\n─── 8.7. Головная часть ЖТ ───")
     print(f"  Форсунок/завихрителей n = π·D_ср/(t̄фр·H_ж.т) = {r['n_forc']} (t̄фр = {p['t_fr']}), "
@@ -422,7 +437,8 @@ def print_report(r):
 
     print("\n─── Компоновка (x = 0 — выход ЛД ЦБК) ───")
     print(f"  Задняя стенка радиального диффузора ЦБК x = {mm(g['x_back']):.1f} мм, вход в СА ТВД x = "
-          f"{mm(g['x_c']):.1f} мм, купол x = {mm(g['x_dome']):.1f} мм, задний торец корпуса x = {mm(g['x_end']):.1f} мм")
+          f"{mm(g['x_c']):.1f} мм, купол x = {mm(g['x_dome']):.1f} мм, скошенная (45°) задняя стенка корпуса: "
+          f"x = {mm(g['x_top']):.1f} мм у D_н, x = {mm(g['x_end']):.1f} мм на среднем радиусе ЖТ")
     print(f"  Радиусы газосборника: наружный {mm(g['Ro']):.1f} мм (D_ж.н → втулка СА), внутренний {mm(g['Ri']):.1f} мм "
           f"(D_ж.вн → корпус СА); зазор до стенки диффузора ЦБК {mm(g['clear']):.1f} мм")
     if r["warnings"]:

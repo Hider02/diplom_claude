@@ -12,7 +12,8 @@
 print и plt.show() временно подавляются, чтобы не открывать лишние окна и не засорять вывод.
 
 Положение КС и ТВД по оси следует из расчёта КС (вход — сразу за ЛД ЦБК, СА ТВД — в плоскости выхода
-газосборника); условно задана только длина переходного канала ТВД → СТ.
+газосборника); переходный канал ТВД → СТ постоянной высоты и вход СА СТ — free_turbine/perehod.py (по чертежу
+books/гг.png).
 
 Запуск из корня проекта: python layout/meridional.py
 Результат: layout/meridional_layout.png (и окно, если доступен интерактивный backend).
@@ -28,10 +29,6 @@ import numpy as np
 from kamera_sgoraniya.plot import draw_combustor
 
 MM = 1000.0  # перевод м -> мм для всех расчётных величин ниже
-
-# Условная (не из расчёта) длина переходного канала между ТВД и СТ, мм — только чтобы разнести блоки.
-GAP_MID = 80.0
-
 
 def scale_komp(komp):
     """Геометрия ЦБК в мм (остальные величины — без изменений)."""
@@ -53,7 +50,9 @@ def _get_geometry():
         plt.show = _show
         plt.close("all")
     from kamera_sgoraniya.main import compute
+    from free_turbine import perehod
     ks = compute(t, tvd)
+    duct = perehod.from_models(ks, tvd, ct)
 
     r = scale_komp(t.komp)
 
@@ -61,7 +60,7 @@ def _get_geometry():
                 S_sa=tvd.S_sa * MM, S_rk=tvd.S_rk * MM, D_sr=tvd.D_sr * MM)
     st = dict(D_sa=ct.D_sa * MM, d_sa=ct.d_sa * MM, D_rk=ct.D_rk * MM, d_rk=ct.d_rk * MM,
               S_sa=ct.S_sa * MM, S_rk=ct.S_rk * MM, D_sr=ct.D_sr * MM)
-    return r, ks, turb, st
+    return r, ks, turb, st, duct
 
 
 def draw_compressor(ax, r, x0, out_dims=True):
@@ -150,9 +149,10 @@ def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
 
 
 def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_color="lightcoral", in_dims=True,
-                       label_y=None):
+                       label_y=None, sa_in=None):
     """Меридиональное сечение осевой ступени СА+РК (копия geometрии turbine/plot_turb.py:plot_meridional_section,
-    сдвинутая на x0). Возвращает (x_in, hub_in, tip_in, x_out, hub_out, tip_out)."""
+    сдвинутая на x0). sa_in = (r_вт, r_к) на входе в СА, если СА раскрывается (СТ за переходным каналом),
+    иначе СА постоянной высоты. Возвращает (x_in, hub_in, tip_in, x_out, hub_out, tip_out)."""
     S_sa, S_rk = geo["S_sa"], geo["S_rk"]
     D_ca_hub, D_ca_tip = geo["d_sa"], geo["D_sa"]
     D_rk_hub, D_rk_tip = geo["d_rk"], geo["D_rk"]
@@ -165,8 +165,9 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
 
     r_ca_hub, r_ca_tip = D_ca_hub / 2, D_ca_tip / 2
     r_rk_hub_out, r_rk_tip_out = D_rk_hub / 2, D_rk_tip / 2
+    r_in_hub, r_in_tip = sa_in if sa_in is not None else (r_ca_hub, r_ca_tip)
 
-    ax.add_patch(patches.Polygon([(z_ca_in, r_ca_hub), (z_ca_in, r_ca_tip), (z_ca_out, r_ca_tip),
+    ax.add_patch(patches.Polygon([(z_ca_in, r_in_hub), (z_ca_in, r_in_tip), (z_ca_out, r_ca_tip),
                                   (z_ca_out, r_ca_hub)], closed=True, lw=1.4, edgecolor="black",
                                  facecolor=sa_color, alpha=0.85))
     ax.add_patch(patches.Polygon([(z_ca_out, r_ca_hub), (z_ca_out, r_ca_tip), (z_gap_out, r_ca_tip),
@@ -175,8 +176,8 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
     ax.add_patch(patches.Polygon([(z_rk_in, r_ca_hub), (z_rk_in, r_ca_tip), (z_rk_out, r_rk_tip_out),
                                   (z_rk_out, r_rk_hub_out)], closed=True, lw=1.4, edgecolor="black",
                                  facecolor=rk_color, alpha=0.85))
-    ax.plot([z_ca_in, z_ca_out, z_gap_out, z_rk_out], [r_ca_hub, r_ca_hub, r_ca_hub, r_rk_hub_out], "k-", lw=1.6)
-    ax.plot([z_ca_in, z_ca_out, z_gap_out, z_rk_out], [r_ca_tip, r_ca_tip, r_ca_tip, r_rk_tip_out], "k-", lw=1.6)
+    ax.plot([z_ca_in, z_ca_out, z_gap_out, z_rk_out], [r_in_hub, r_ca_hub, r_ca_hub, r_rk_hub_out], "k-", lw=1.6)
+    ax.plot([z_ca_in, z_ca_out, z_gap_out, z_rk_out], [r_in_tip, r_ca_tip, r_ca_tip, r_rk_tip_out], "k-", lw=1.6)
     ax.text((z_ca_in + z_ca_out) / 2, r_ca_tip + 6, "СА", ha="center", fontsize=10, fontweight="bold",
             color="darkblue")
     ax.text((z_rk_in + z_rk_out) / 2, r_rk_tip_out + 6, "РК", ha="center", fontsize=10, fontweight="bold",
@@ -189,8 +190,8 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
     dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
     off = 0.14 * r_ca_tip
     if in_dims:  # у ТВД диаметры входа в СА проставляет КС (они её выход)
-        _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub:.0f}", -1)
-        _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip:.0f}", -1)
+        _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_in_hub, f"⌀{2 * r_in_hub:.0f}", -1)
+        _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_in_tip, f"⌀{2 * r_in_tip:.0f}", -1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx1, r_rk_hub_out, f"⌀{D_rk_hub:.0f}", 1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx2, r_rk_tip_out, f"⌀{D_rk_tip:.0f}", 1)
     _dim_width(ax, z_ca_in, z_ca_out, r_ca_hub, r_ca_hub, r_ca_hub - off, f"S={S_sa:.0f}")
@@ -200,14 +201,29 @@ def draw_axial_turbine(ax, x0, geo, axial_gap, label, sa_color="lightblue", rk_c
     return z_ca_in, r_ca_hub, r_ca_tip, z_rk_out, r_rk_hub_out, r_rk_tip_out
 
 
-def label_gap(ax, x0, x1, y, text):
-    """Текстовая подпись условного зазора между узлами (без отрисовки переходного канала).
-    va="top" — точка y задаёт верх текстового блока, чтобы многострочная подпись росла вниз."""
-    ax.text((x0 + x1) / 2, y, text, ha="center", va="top", fontsize=11, fontweight="bold", style="italic")
+def draw_duct(ax, d, x0, label=True):
+    """Переходный канал ТВД → СТ постоянной высоты (free_turbine/perehod.py; d — в м, координаты КС),
+    x0 — сдвиг координат КС на схеме, мм. Возвращает осевую координату входа в СА СТ, мм."""
+    X = lambda v: x0 + v * MM
+    xa, xb = X(d["x_rk"]), X(d["x_ct"])
+    hub = (d["r_rk_hub"] * MM, d["r_in_hub"] * MM)
+    tip = (d["r_rk_tip"] * MM, d["r_in_tip"] * MM)
+    ax.fill([xa, xb, xb, xa], [hub[0], hub[1], tip[1], tip[0]], color="lavender", edgecolor="none",
+            label="Переходный канал ТВД → СТ")
+    ax.plot([xa, xb], hub, "k-", lw=1.6)
+    ax.plot([xa, xb], tip, "k-", lw=1.6)
+    k = (hub[1] - hub[0]) / (xb - xa)
+    ym = (hub[0] + tip[0]) / 2
+    ax.annotate("", xy=(xb - 5, ym + k * (xb - 5 - xa)), xytext=(xa + 5, ym + 5 * k),
+                arrowprops=dict(arrowstyle="-|>", lw=1.3, mutation_scale=11, color="firebrick"))
+    if label:
+        ax.text((xa + xb) / 2, hub[0] - 8, f"переходный канал: h = {d['h'] * MM:.0f} мм, подъём {d['gamma']:.1f}°",
+                ha="center", va="top", fontsize=8.5, style="italic")
+    return xb
 
 
 def main():
-    r, ks, tvd, ct = _get_geometry()
+    r, ks, tvd, ct, duct = _get_geometry()
 
     fig, ax = plt.subplots(figsize=(16, 7))
 
@@ -216,10 +232,9 @@ def main():
     # Верхняя граница по радиусу известна заранее — подписи зазоров размещаются у неё, выше всех
     # размерных линий диаметров (те не поднимаются выше макс. радиуса узлов) во избежание наложения
     r_max = max(tip_out_c, ks["D_n"] * MM / 2, ct["D_sa"] / 2, ct["D_rk"] / 2) * 1.28
-    y_label = r_max * 0.85
 
     # КС: вход — выход ЛД ЦБК (x_out_c), СА ТВД — в плоскости выхода газосборника, под жаровой трубой
-    c = draw_combustor(ax, ks, x_out_c)
+    c = draw_combustor(ax, ks, x_out_c, dims=False, duct=duct)  # размеры КС — на kamera_sgoraniya/combustor_layout.png
     x_ks_end = c["x_end"]
     ax.text((x_out_c + x_ks_end) / 2, ks["D_n"] * MM / 2 + 36, "КС (петлевая)", ha="center",
             fontsize=13, fontweight="bold")
@@ -228,13 +243,11 @@ def main():
     (x_in_t, hub_in_t, tip_in_t, x_out_t, hub_out_t, tip_out_t) = draw_axial_turbine(
         ax, c["xc"], tvd, axial_gap_tvd, "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
 
-    x_mid_start = max(x_out_t, x_ks_end + 70)  # правее размерных линий КС
-    x_mid_end = x_mid_start + GAP_MID
-    label_gap(ax, x_mid_start, x_mid_end, y_label, "переходной\nканал")
+    x_ct = draw_duct(ax, duct, x_out_c)
 
     axial_gap_ct = 0.25 * ct["S_rk"]
     (x_in_s, hub_in_s, tip_in_s, x_out_s, hub_out_s, tip_out_s) = draw_axial_turbine(
-        ax, x_mid_end, ct, axial_gap_ct, "СТ (свободная турбина)")
+        ax, x_ct, ct, axial_gap_ct, "СТ (свободная турбина)", sa_in=(duct["r_in_hub"] * MM, duct["r_in_tip"] * MM))
 
     x_total = x_out_s
     # Запас под размерные линии диаметров на входе в ЦБК (слева) и на выходе из СТ (справа) —
@@ -246,7 +259,7 @@ def main():
     ax.set_aspect("equal")
     ax.set_xlim(x_left, x_right)
     ax.set_ylim(-15, r_max)
-    ax.set_xlabel("Осевая координата, мм (в масштабе; условна только длина переходного канала ТВД → СТ)")
+    ax.set_xlabel("Осевая координата, мм (в масштабе)")
     ax.set_ylabel("Радиус, мм")
     ax.set_title("Меридиональная схема тракта: ЦБК → КС → ТВД → СТ (общий масштаб по радиусу)",
                 fontsize=13, fontweight="bold")
@@ -269,7 +282,8 @@ def main():
     print(f"{'КС: корпус D_н':<28} | {'-':>8} | {ks['D_n'] * MM:>8.1f} | {'-':>8}")
     print(f"{'ТВД: вход СА':<28} | {tvd['d_sa']:>8.1f} | {tvd['D_sa']:>8.1f} | {tvd['D_sr']:>8.1f}")
     print(f"{'ТВД: выход РК':<28} | {tvd['d_rk']:>8.1f} | {tvd['D_rk']:>8.1f} | {'-':>8}")
-    print(f"{'СТ: вход СА':<28} | {ct['d_sa']:>8.1f} | {ct['D_sa']:>8.1f} | {ct['D_sr']:>8.1f}")
+    print(f"{'СТ: вход СА':<28} | {2 * duct['r_in_hub'] * MM:>8.1f} | {2 * duct['r_in_tip'] * MM:>8.1f} | {'-':>8}")
+    print(f"{'СТ: выход СА':<28} | {ct['d_sa']:>8.1f} | {ct['D_sa']:>8.1f} | {ct['D_sr']:>8.1f}")
     print(f"{'СТ: выход РК':<28} | {ct['d_rk']:>8.1f} | {ct['D_rk']:>8.1f} | {'-':>8}")
 
     plt.show()
