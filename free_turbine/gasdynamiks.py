@@ -1,4 +1,10 @@
+import contextlib
+import io
 import math
+
+import matplotlib.pyplot as plt
+
+from free_turbine import perehod
 from turbine import plot_turb as p
 from turbine import baturin as bt
 from termo.termodynamiks import (R_g, cp_g, alpha, eta_ct, eta_mex_ct, g_gas, T4, P45, P5, P0, T5,
@@ -26,7 +32,7 @@ HP = 735.499  # 1 л.с. (метрическая), Вт
 n_ct = 30600  # Частота вращения ротора СТ, об/мин
 D_sr = 0.238  # Средний диаметр СТ, м
 # Осевая ширина СА: (h/S)_са = 1,15 ([2], п. 42: 1…3) — СА удлинён, т.к. он раскрывается от высоты
-# переходного канала (≈ 21 мм) до l_c, и углы раскрытия должны уложиться в [2], п. 43 (см. perehod.py)
+# переходного канала (≈ 21 мм) до l_c, и углы раскрытия должны уложиться в [2], п. 43 (проверка — п. 3.3 ниже)
 hS_sa = 1.15
 
 # Параметры газа на входе в СТ (полные) — сечение 45 термодинамического расчёта
@@ -373,23 +379,50 @@ beta1_bl_arr, beta2_bl_arr = bt.print_blade_angles(
     lambda_w2_arr, S_sa, S_rk, Z_ca_bl, Z_rk_bl, i_ca, i_rk)
 
 
+# Вход в СА (сечение 0). СТ стоит за переходным каналом постоянной высоты (free_turbine/perehod.py, по чертежу
+# books/гг.png), поэтому высота на входе в СА равна высоте лопатки РК ТВД на выходе, а СА раскрывается от неё
+# до l_c. Раскрытие делится между периферией и втулкой пропорционально предельным углам [2], п. 43.
+_show = plt.show
+plt.show = lambda *a, **k: None
+with contextlib.redirect_stdout(io.StringIO()):  # расчёт ТВД — без его протокола и окон
+    import turbine.gasdynamiks as tvd
+plt.show = _show
+h_0 = (tvd.D_rk - tvd.d_rk) / 2
+r0_hub, r0_tip = perehod.sa_inlet(d_sa / 2, D_sa / 2, h_0)
+d_sa0, D_sa0 = 2 * r0_hub, 2 * r0_tip
+
 print("\n--- 3.3. Проверка углов раскрытия проточной части (Батурин п. 43) ---")
+print(f"Вход в СА (за переходным каналом высотой {h_0 * 1000:.1f} мм): ⌀{d_sa0 * 1000:.1f}/⌀{D_sa0 * 1000:.1f} мм, "
+      f"выход СА: ⌀{d_sa * 1000:.1f}/⌀{D_sa * 1000:.1f} мм, S_са = {S_sa * 1000:.0f} мм")
+gamma_sa_k = math.degrees(math.atan((D_sa - D_sa0) / (2 * S_sa)))
+gamma_sa_vt = math.degrees(math.atan((d_sa0 - d_sa) / (2 * S_sa)))
 gamma_rk_k = math.degrees(math.atan((D_rk - D_sa) / (2 * S_rk)))
 gamma_rk_vt = math.degrees(math.atan((d_sa - d_rk) / (2 * S_rk)))
 
+print(f"Угол раскрытия СА на периферии: {gamma_sa_k:.2f}° (Должно быть меньше: 15...20°)")
+print(f"Угол раскрытия СА на втулке:    {gamma_sa_vt:.2f}° (Должно быть меньше: 8...12°)")
 print(f"Угол раскрытия РК на периферии: {gamma_rk_k:.2f}° (Должно быть меньше: 15...20°)")
 print(f"Угол раскрытия РК на втулке:    {gamma_rk_vt:.2f}° (Должно быть меньше: 8...12°)")
 
+flare_ok = True
 if gamma_rk_vt < 0 or gamma_rk_k < 0:
+    flare_ok = False
     print("⚠️ ВНИМАНИЕ: канал РК сужается (отрицательный угол раскрытия) — лопатка РК ниже лопатки СА.")
     print("   Рекомендация: увеличить dl_rk (l_рк = l_c + 0…2 мм).")
 elif gamma_rk_vt > 12 or gamma_rk_k > 20:
-    print("⚠️ ВНИМАНИЕ: Угол раскрытия превышает норму! Возможны отрывы потока.")
+    flare_ok = False
+    print("⚠️ ВНИМАНИЕ: Угол раскрытия РК превышает норму! Возможны отрывы потока.")
     print("   Рекомендация: Увеличить осевую ширину венцов (S = l / 1.5 или меньше) в 1D расчете.")
-else:
+if gamma_sa_vt > 12 or gamma_sa_k > 20:
+    flare_ok = False
+    print("⚠️ ВНИМАНИЕ: Угол раскрытия СА превышает норму! Возможны отрывы потока.")
+    print("   Рекомендация: увеличить осевую ширину СА (уменьшить hS_sa) или уменьшить l_c.")
+elif gamma_sa_vt > 8 or gamma_sa_k > 15:
+    print("   Раскрытие СА — в верхней части допустимого диапазона [2] (15…20° / 8…12°).")
+if flare_ok:
     print("✅ Геометрия меридионального канала обеспечивает безотрывное течение.")
 
-p.plot_meridional_section(S_sa, S_rk, d_sa, D_sa, d_rk, D_rk, axial_gap=0.25 * S_rk)
+p.plot_meridional_section(S_sa, S_rk, d_sa, D_sa, d_rk, D_rk, axial_gap=0.25 * S_rk, D_ca0_hub=d_sa0, D_ca0_tip=D_sa0)
 p.plot_velocity_triangles(
     c_1=c_1,
     alpha_1_rad=alpha_1_rad,

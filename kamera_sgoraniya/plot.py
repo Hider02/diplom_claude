@@ -29,8 +29,14 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     hub_x = np.array([X(p[0] * MM) for p in r["geo"]["hub"]])
     hub_r = np.array([p[1] * MM for p in r["geo"]["hub"]])
     h_zh, r_zh_sr = r["H_zh"] * MM, r["D_sr"] / 2 * MM
-    # Скошенная задняя стенка корпуса и «пол» КС: корпус СА/РК ТВД и наружная стенка канала к СТ
+    # «Пол» КС: корпус СА/РК ТВД и наружная стенка канала к СТ
     x_top = X(g["x_top"])
+    # Угол корпус D_н → задняя стенка срезан прямой (как на рис. 8.3 Мингазова)
+    arc_x = [X(g["ch_x_top"]), X(g["ch_x_w"])]
+    arc_r = [g["r_ksn"], g["ch_r_w"]]
+    # Передняя стенка корпуса у ЦБК: вертикально до носка газосборника, ниже — дугой вокруг него (рис. 8.3)
+    fr_x, fr_r = _arc(xc, g["rc_o"], g["R_front"], 180, 270)
+    fr_x, fr_r = list(fr_x), list(fr_r)
     if duct is not None:
         floor_x = [X(duct["x_b"] * MM), X(duct["x_rk"] * MM), xc]
         floor_r = [duct["r_b"] * MM, duct["r_rk_tip"] * MM, g["r_vyh_n"]]
@@ -48,11 +54,11 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
 
     # Воздушная полость: наружный канал F_кк над жаровой трубой, за куполом вниз, внутренняя полость над ТВД,
     # спереди — полость между газосборником и задней стенкой диффузора ЦБК
-    air_x = np.concatenate([[x_d1, x_d1, x_top], floor_x, in_x[::-1], [xd], dome_x, [xc], out_x,
-                            [x_back, x_back], hub_x, [x0]])
-    air_r = np.concatenate([[g["r_d1_vn"], g["r_ksn"], g["r_ksn"]], floor_r, in_r[::-1],
+    air_x = np.concatenate([[x_d1, x_d1], arc_x, floor_x, in_x[::-1], [xd], dome_x, [xc], out_x,
+                            fr_x[::-1], [x_back], hub_x, [x0]])
+    air_r = np.concatenate([[g["r_d1_vn"], g["r_ksn"]], arc_r, floor_r, in_r[::-1],
                             [g["r_zh_vn"]], dome_r, [g["r_zh_n"]], out_r,
-                            [g["r_vyh_vn"], g["r3"]], hub_r, [g["r_k_vn"]]])
+                            fr_r[::-1], [g["r3"]], hub_r, [g["r_k_vn"]]])
     ax.fill(air_x, air_r, color="lightblue", alpha=0.45, edgecolor="none", label="Воздух КС (F_кк и полости)")
 
     # Газ: жаровая труба + газосборник
@@ -67,15 +73,18 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     ax.plot([xc, xd], [g["r_zh_vn"]] * 2, **k)
     ax.plot(dome_x, dome_r, **k)
     # корпус: наружный, задняя стенка, внутренний (= корпус ТВД и наружная стенка канала к СТ)
-    ax.plot([x_d1, x_d1, x_top] + floor_x, [g["r_d1_n"], g["r_ksn"], g["r_ksn"]] + floor_r, color="black", lw=1.8)
-    # задняя стенка радиального диффузора ЦБК (передняя стенка КС) и опора СА по втулке
-    ax.plot([x_back, x_back, xc], [g["r3"], g["r_vyh_vn"], g["r_vyh_vn"]], color="black", lw=1.8)
+    ax.plot([x_d1, x_d1] + arc_x + floor_x, [g["r_d1_n"], g["r_ksn"]] + arc_r + floor_r, color="black", lw=1.8)
+    # передняя стенка КС: задняя стенка радиального диффузора ЦБК, ниже носка газосборника — дуга вокруг него
+    ax.plot([x_back] + fr_x + [xc], [g["r3"]] + fr_r + [g["r_vyh_vn"]], color="black", lw=1.8)
     ax.plot([x0, x_d1], [g["r_k_vn"], g["r_d1_vn"]], **k)
     ax.plot([x0, x_d1], [g["r_k_n"], g["r_d1_n"]], **k)
     ax.plot([xc, xc], [g["r_vyh_vn"], g["r_vyh_n"]], color="gray", lw=0.8, ls="--")
 
-    # Форсунка через задний торец корпуса к куполу
-    ax.plot([xd + h_zh / 2, x_end + 8], [r_zh_sr] * 2, color="dimgray", lw=3, solid_capstyle="butt")
+    # Форсунка — через срез корпуса, перпендикулярно ему, к куполу (как на рис. 8.3)
+    nx, nr = r["geo"]["ch_nx"], r["geo"]["ch_nr"]
+    r_f0, r_f1 = h_zh / 2, h_zh / 2 + r["dl"] * MM + 15
+    ax.plot([xd + r_f0 * nx, xd + r_f1 * nx], [r_zh_sr + r_f0 * nr, r_zh_sr + r_f1 * nr], color="dimgray",
+            lw=3, solid_capstyle="butt")
 
     # Направления потоков
     arr = dict(arrowstyle="-|>", lw=1.3, mutation_scale=11)
@@ -88,7 +97,7 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
                 xytext=(xc - g["Ro"] * 0.9, g["rc_o"] - 0.3 * g["Ro"]),
                 arrowprops=dict(color="firebrick", connectionstyle="arc3,rad=0.4", **arr))
 
-    c = dict(xc=xc, xd=xd, x_end=floor_x[0], x_top=x_top, x_back=x_back, x0=x0, g=g)
+    c = dict(xc=xc, xd=xd, x_end=floor_x[0], x_top=x_top, x_wall=x_end, x_back=x_back, x0=x0, g=g)
     if dims:
         _dimensions(ax, c)
     return c
@@ -107,7 +116,7 @@ def _dim_len(ax, x0, x1, y, label):
 
 
 def _dimensions(ax, c):
-    g, xc, xd, x_end, x_top = c["g"], c["xc"], c["xd"], c["x_end"], c["x_top"]
+    g, xc, xd, x_end, x_top = c["g"], c["xc"], c["xd"], c["x_end"], c["x_wall"]  # размеры — за задней стенкой
     step = 8.0
     for i, (x_from, rr, name) in enumerate([
             (c["x0"], g["r_k_vn"], "D_к.вн"), (c["x0"], g["r_k_n"], "D_к.н"),
@@ -128,7 +137,7 @@ def plot_combustor(r, komp, tvd, duct=None):
     _, _, _, x_out, _, _ = draw_compressor(ax, scale_komp(komp), 0.0, out_dims=False)
     c = draw_combustor(ax, r, x_out, duct=duct)
     draw_axial_turbine(ax, c["xc"], tvd, 0.25 * tvd["S_rk"], "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
-    x_right = c["x_top"] + 8 * 8 + 15  # за размерными линиями КС
+    x_right = c["x_wall"] + 8 * 8 + 15  # за размерными линиями КС
     if duct is not None:
         x_ct = draw_duct(ax, duct, x_out)
         ax.text(x_ct + 2, duct["r_in_tip"] * MM, "→ СТ", fontsize=10, fontweight="bold", va="center")

@@ -165,7 +165,8 @@ def _dim_width(ax, x0, x1, y0, y1, y_dim, label):
 def plot_meridional_section(S_ca, S_rk,
                             D_ca_hub, D_ca_tip,  # СА (втулка и корпус)
                             D_rk_hub, D_rk_tip,  # РК (втулка и корпус на выходе)
-                            axial_gap=0.005):
+                            axial_gap=0.005,
+                            D_ca0_hub=None, D_ca0_tip=None):  # вход в СА, если СА раскрывается (иначе = выходу)
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # 1. Осевые координаты (Z)
@@ -179,6 +180,8 @@ def plot_meridional_section(S_ca, S_rk,
     # 2. Радиусы (делим диаметры на 2)
     r_ca_hub = D_ca_hub / 2
     r_ca_tip = D_ca_tip / 2
+    r_ca0_hub = (D_ca_hub if D_ca0_hub is None else D_ca0_hub) / 2
+    r_ca0_tip = (D_ca_tip if D_ca0_tip is None else D_ca0_tip) / 2
 
     # На входе в РК диаметры такие же, как на выходе из СА
     r_rk_hub_in = D_ca_hub / 2
@@ -188,9 +191,9 @@ def plot_meridional_section(S_ca, S_rk,
     r_rk_hub_out = D_rk_hub / 2
     r_rk_tip_out = D_rk_tip / 2
 
-    # 3. СА (прямоугольник)
+    # 3. СА (прямоугольник или трапеция, если СА раскрывается)
     sa_verts = [
-        (z_ca_in, r_ca_hub), (z_ca_in, r_ca_tip),
+        (z_ca_in, r_ca0_hub), (z_ca_in, r_ca0_tip),
         (z_ca_out, r_ca_tip), (z_ca_out, r_ca_hub)
     ]
     ax.add_patch(patches.Polygon(sa_verts, closed=True, linewidth=1.5,
@@ -216,11 +219,11 @@ def plot_meridional_section(S_ca, S_rk,
 
     # 6. Непрерывные линии втулки и корпуса
     hub_z = [z_ca_in, z_ca_out, z_gap_out, z_rk_out]
-    hub_r = [r_ca_hub, r_ca_hub, r_rk_hub_in, r_rk_hub_out]
+    hub_r = [r_ca0_hub, r_ca_hub, r_rk_hub_in, r_rk_hub_out]
     ax.plot(hub_z, hub_r, 'k-', linewidth=2.5, label='Втулка')
 
     tip_z = [z_ca_in, z_ca_out, z_gap_out, z_rk_out]
-    tip_r = [r_ca_tip, r_ca_tip, r_rk_tip_in, r_rk_tip_out]
+    tip_r = [r_ca0_tip, r_ca_tip, r_rk_tip_in, r_rk_tip_out]
     ax.plot(tip_z, tip_r, 'k-', linewidth=2.5, label='Корпус')
 
     # 7. Подписи
@@ -233,8 +236,8 @@ def plot_meridional_section(S_ca, S_rk,
     # осевая ширина СА и РК, осевой зазор между ними
     dx1, dx2 = 0.16 * r_ca_tip, 0.34 * r_ca_tip
     off = 0.12 * r_ca_tip
-    _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca_hub, f"⌀{D_ca_hub * 1000:.0f}", -1)
-    _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca_tip, f"⌀{D_ca_tip * 1000:.0f}", -1)
+    _dim_diam(ax, z_ca_in, z_ca_in - dx1, r_ca0_hub, f"⌀{2 * r_ca0_hub * 1000:.0f}", -1)
+    _dim_diam(ax, z_ca_in, z_ca_in - dx2, r_ca0_tip, f"⌀{2 * r_ca0_tip * 1000:.0f}", -1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx1, r_rk_hub_out, f"⌀{D_rk_hub * 1000:.0f}", 1)
     _dim_diam(ax, z_rk_out, z_rk_out + dx2, r_rk_tip_out, f"⌀{D_rk_tip * 1000:.0f}", 1)
     _dim_width(ax, z_ca_in, z_ca_out, r_ca_hub, r_ca_hub, r_ca_hub - off, f"S={S_ca * 1000:.0f}")

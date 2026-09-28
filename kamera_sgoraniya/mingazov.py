@@ -298,7 +298,20 @@ def layout(r, diff):
     C_wall = wall_s * x_dome + wall_c * r["D_sr"] / 2 + r["H_zh"] / 2 + r["dl"]
     x_at = lambda rr: (C_wall - wall_c * rr) / wall_s
     x_end = x_at(r["D_sr"] / 2)  # стенка на среднем радиусе ЖТ
-
+    # Угол между корпусом D_н и задней стенкой срезан прямой (как на рис. 8.3; через срез, перпендикулярно ему,
+    # входит форсунка): срез — по биссектрисе угла, на том же расстоянии H_ж/2 + Δl от центра купола, что и стенки
+    r_ksn = R(r["D_n"])
+    nx, nr = wall_s, 1 + wall_c  # нормаль среза: сумма нормалей корпуса (0, 1) и стенки (sinβ, cosβ)
+    nn = math.hypot(nx, nr)
+    nx, nr = nx / nn, nr / nn
+    C_ch = nx * x_dome + nr * r["D_sr"] / 2 + r["H_zh"] / 2 + r["dl"]
+    ch_x_top = (C_ch - nr * r_ksn) / nx  # срез на корпусе
+    det = nx * wall_c - nr * wall_s  # срез на стенке: nx·x + nr·r = C_ch, sinβ·x + cosβ·r = C_wall
+    ch_x_w, ch_r_w = (C_ch * wall_c - nr * C_wall) / det, (nx * C_wall - wall_s * C_ch) / det
+    # Передняя стенка корпуса у ЦБК (выделена на рис. 8.3): от задней стенки радиального диффузора вертикально
+    # до уровня носка газосборника, ниже — дугой вокруг газосборника (центр — центр его наружной стенки,
+    # радиус x_c − x_back, т.е. с зазором GAP_WALL) до плоскости входа в СА ТВД
+    R_front = x_c - x_back
     # Наименьший радиальный зазор между стенкой диффузора ЦБК (колено, ЛД, диффузор КС) и наружной стенкой
     # газосборника / ЖТ
     wall = hub + [(0.0, R(r["D_k_vn"])), (r["L_d"], R(r["D1_vn"]))]
@@ -317,7 +330,8 @@ def layout(r, diff):
     return dict(r_k_vn=R(r["D_k_vn"]), r_k_n=R(r["D_k_n"]), r_d1_vn=R(r["D1_vn"]), r_d1_n=R(r["D1_n"]),
                 r_2vn=R(r["D2_vn"]), x_d1=r["L_d"], x_back=x_back, hub=hub, r3=diff["r3"], x_nose=x_nose,
                 rc_o=rc_o, Ro=Ro, rc_i=rc_i, Ri=Ri, x_c=x_c, x_dome=x_dome, x_end=x_end, C_wall=C_wall, wall_s=wall_s, wall_c=wall_c,
-                x_top=x_at(R(r["D_n"])), x_wall_t=x_at(r_t_n), L_under=x_at(r_t_n) - x_c,
+                x_top=ch_x_top, x_wall_t=x_at(r_t_n), L_under=x_at(r_t_n) - x_c,
+                ch_x_top=ch_x_top, ch_x_w=ch_x_w, ch_r_w=ch_r_w, ch_nx=nx, ch_nr=nr, R_front=R_front,
                 L_turn=math.pi * ((r["D_sr"] - r["D_t_sr"]) / 4), clear=clear,
                 r_vyh_vn=r_t_vn, r_vyh_n=r_t_n, r_zh_vn=r_zh_vn, r_zh_n=r_zh_n, r_ksn=R(r["D_n"]))
 
@@ -445,8 +459,10 @@ def print_report(r):
 
     print("\n─── Компоновка (x = 0 — выход ЛД ЦБК) ───")
     print(f"  Задняя стенка радиального диффузора ЦБК x = {mm(g['x_back']):.1f} мм, вход в СА ТВД x = "
-          f"{mm(g['x_c']):.1f} мм, купол x = {mm(g['x_dome']):.1f} мм, задняя стенка корпуса ({p['wall_angle']:.0f}° к оси): "
-          f"x = {mm(g['x_top']):.1f} мм у D_н, x = {mm(g['x_end']):.1f} мм на среднем радиусе ЖТ")
+          f"{mm(g['x_c']):.1f} мм, купол x = {mm(g['x_dome']):.1f} мм, задняя стенка корпуса ({p['wall_angle']:.0f}° к оси) x = {mm(g['x_end']):.1f} мм, "
+          f"угол с корпусом срезан прямой от x = {mm(g['ch_x_top']):.1f} мм у D_н до r = {mm(g['ch_r_w']):.1f} мм на стенке")
+    print(f"  Передняя стенка корпуса у ЦБК огибает газосборник по дуге R = {mm(g['R_front']):.1f} мм (зазор "
+          f"{mm(g['R_front'] - g['Ro']):.0f} мм)")
     print(f"  Радиусы газосборника: наружный {mm(g['Ro']):.1f} мм (D_ж.н → втулка СА), внутренний {mm(g['Ri']):.1f} мм "
           f"(D_ж.вн → корпус СА); зазор до стенки диффузора ЦБК {mm(g['clear']):.1f} мм")
     if r["warnings"]:
