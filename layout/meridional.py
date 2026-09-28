@@ -247,7 +247,8 @@ def main():
 
     axial_gap_ct = 0.25 * ct["S_rk"]
     (x_in_s, hub_in_s, tip_in_s, x_out_s, hub_out_s, tip_out_s) = draw_axial_turbine(
-        ax, x_ct, ct, axial_gap_ct, "СТ (свободная турбина)", sa_in=(duct["r_in_hub"] * MM, duct["r_in_tip"] * MM))
+        ax, x_ct, ct, axial_gap_ct, "СТ (свободная турбина)", sa_in=(duct["r_in_hub"] * MM, duct["r_in_tip"] * MM),
+        label_y=ks["D_n"] * MM / 2 + 15)  # над корпусом КС, чтобы не наезжать на форсунку
 
     x_total = x_out_s
     # Запас под размерные линии диаметров на входе в ЦБК (слева) и на выходе из СТ (справа) —

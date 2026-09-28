@@ -21,7 +21,7 @@ def _arc(xc, rc, R, phi0, phi1, n=60):
 
 def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     """Меридиональное сечение петлевой (противоточной) КС на оси ax, x0 — выход осевого ЛД ЦБК, мм.
-    duct — переходный канал ТВД → СТ (free_turbine/perehod.py, м, координаты КС): скошенная задняя стенка
+    duct — переходный канал ТВД → СТ (free_turbine/perehod.py, м, координаты КС): задняя стенка
     КС садится на его наружную стенку; без него — на корпус СА ТВД. Возвращает координаты (мм)."""
     g = {k: v * MM for k, v in r["geo"].items() if isinstance(v, float)}
     X = lambda v: x0 + v
@@ -29,13 +29,13 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     hub_x = np.array([X(p[0] * MM) for p in r["geo"]["hub"]])
     hub_r = np.array([p[1] * MM for p in r["geo"]["hub"]])
     h_zh, r_zh_sr = r["H_zh"] * MM, r["D_sr"] / 2 * MM
-    # Скошенная (45°) задняя стенка корпуса x + r = C и «пол» КС: корпус СА/РК ТВД и наружная стенка канала к СТ
+    # Скошенная задняя стенка корпуса и «пол» КС: корпус СА/РК ТВД и наружная стенка канала к СТ
     x_top = X(g["x_top"])
     if duct is not None:
         floor_x = [X(duct["x_b"] * MM), X(duct["x_rk"] * MM), xc]
         floor_r = [duct["r_b"] * MM, duct["r_rk_tip"] * MM, g["r_vyh_n"]]
     else:
-        floor_x = [X(g["C_wall"] - g["r_vyh_n"]), xc]
+        floor_x = [X(g["x_wall_t"]), xc]
         floor_r = [g["r_vyh_n"], g["r_vyh_n"]]
 
     out_x, out_r = _arc(xc, g["rc_o"], g["Ro"], 90, 270)  # наружная стенка газосборника: Джтрн → втулка СА
@@ -66,7 +66,7 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     ax.plot([xc, xd], [g["r_zh_n"]] * 2, **k)
     ax.plot([xc, xd], [g["r_zh_vn"]] * 2, **k)
     ax.plot(dome_x, dome_r, **k)
-    # корпус: наружный, скошенная задняя стенка, внутренний (= корпус ТВД и наружная стенка канала к СТ)
+    # корпус: наружный, задняя стенка, внутренний (= корпус ТВД и наружная стенка канала к СТ)
     ax.plot([x_d1, x_d1, x_top] + floor_x, [g["r_d1_n"], g["r_ksn"], g["r_ksn"]] + floor_r, color="black", lw=1.8)
     # задняя стенка радиального диффузора ЦБК (передняя стенка КС) и опора СА по втулке
     ax.plot([x_back, x_back, xc], [g["r3"], g["r_vyh_vn"], g["r_vyh_vn"]], color="black", lw=1.8)
