@@ -103,6 +103,91 @@ def draw_combustor(ax, r, x0=0.0, dims=True, duct=None):
     return c
 
 
+def _spread(segments, n):
+    """n точек, равномерно разнесённых по отрезкам segments [(a, b), ...] (как по одному склеенному отрезку)."""
+    segments = [(a, b) for a, b in segments if b >= a]
+    total = sum(b - a for a, b in segments)
+    pts = []
+    for k in range(n):
+        t = total * k / (n - 1) if n > 1 else 0.0
+        for a, b in segments:
+            if t <= b - a + 1e-9:
+                pts.append(a + t)
+                break
+            t -= b - a
+    return pts
+
+
+def _belt(ax, P, t, nv, lip, step, gap):
+    """Условный пояс охлаждения в точке стенки P: t — направление течения газа вдоль стенки, nv — нормаль внутрь
+    ЖТ (единичные векторы). Окно gap в стенке, уступ step внутрь, козырёк lip по потоку, плёнка воздуха."""
+    P, t, nv = np.asarray(P), np.asarray(t), np.asarray(nv)
+    pts = lambda *q: np.array(q).T
+    ax.plot(*pts(P, P + gap * t), color="white", lw=2.5, solid_capstyle="butt", zorder=3)
+    ax.plot(*pts(P, P + step * nv, P + step * nv + lip * t), color="black", lw=1.3, zorder=4)
+    deg = lambda v: math.degrees(math.atan2(v[1], v[0]))
+    ax.annotate("", xy=P + (lip + 2.5) * t + 0.5 * step * nv, xytext=P + 0.5 * gap * t - 4.0 * nv, zorder=5,
+                arrowprops=dict(arrowstyle="-|>", color="royalblue", lw=0.9, mutation_scale=7,
+                                connectionstyle=f"angle,angleA={deg(nv):.1f},angleB={deg(t):.1f},rad=2"))
+
+
+def draw_liner_holes(ax, r, c, n_turn=2, lip=4.0, step=1.8, gap=1.8, margin=1.0, legend_kw=None):
+    """Отверстия и пояса охлаждения ЖТ (п. 8.6); газ на прямом участке идёт в −x, расстояния u отсчитываются от
+    стыка купола с прямым участком:
+      - отверстия зоны горения (ОЗГ, d_озг) — ряд на границе первичной зоны, u = L_п.з;
+      - отверстия смесителя (ОЗС, d_озс) — ряд в конце зоны догорания, вплотную к газосборнику (смесителю);
+      - пояса охлаждения (п. 8.6.7, n_ohl): n_ohl − n_turn — на обеих стенках прямого участка, равномерно
+        в промежутках между куполом и рядами отверстий; n_turn — на наружной стенке газосборника (поворот
+        на 180°, самая длинная и горячая стенка смесителя), равномерно по углу. Внутренняя стенка газосборника —
+        дуга R ≈ 6 мм — сразу переходит в корпус СА, поясов на ней нет.
+    В сечении отверстие — разрыв стенки шириной d со струёй глубиной m·H_ж.т (п. 8.6.1). Щель пояса h_s ≪ 1 мм
+    в масштабе не видна, поэтому пояс условный (мм): секция стенки выше по потоку уступом step уходит внутрь ЖТ
+    и козырьком lip перекрывает начало следующей; воздух входит в окно gap и выходит плёнкой вдоль стенки.
+    Осевые положения рядов и поясов в расчёте не задаются — приняты здесь только для рисунка.
+    legend_kw — положение легенды отверстий (по умолчанию — под основной легендой combustor_layout.png)."""
+    from matplotlib.lines import Line2D
+
+    g, xc, xd = c["g"], c["xc"], c["xd"]
+    walls = ((g["r_zh_n"], -1), (g["r_zh_vn"], 1))  # s — направление внутрь ЖТ
+    d_g, d_s = r["d_ozg"] * MM, r["d_ozs"] * MM
+    u_g = r["L_pz"] * MM
+    u_s = (xd - xc) - d_s / 2 - margin
+    jet = r["params"]["m"] * r["H_zh"] * MM
+
+    rows = (("navy", d_g, u_g), ("teal", d_s, u_s))
+    for color, d, u in rows:
+        xh = xd - u
+        for rw, s in walls:
+            ax.plot([xh - d / 2, xh + d / 2], [rw, rw], color="white", lw=2.5, solid_capstyle="butt", zorder=3)
+            ax.annotate("", xy=(xh, rw + s * jet), xytext=(xh, rw - s * 2.5), zorder=5,
+                        arrowprops=dict(arrowstyle="-|>", color=color, lw=1.4, mutation_scale=10))
+
+    n = r["n_ohl"]
+    n_turn = min(n_turn, n)
+    free = [(0.0, u_g - d_g / 2 - margin - lip), (u_g + d_g / 2 + margin, u_s - d_s / 2 - margin - lip)]
+    for u in _spread(free, n - n_turn):
+        for rw, s in walls:
+            _belt(ax, (xd - u, rw), (-1.0, 0.0), (0.0, s), lip, step, gap)
+    # наружная стенка газосборника: дуга от D_ж.н (φ = 90°) через носок (180°) к втулке СА (270°)
+    for k in range(n_turn):
+        phi = math.radians(90 + 180 * (k + 1) / (n_turn + 1))
+        cs, sn = math.cos(phi), math.sin(phi)
+        _belt(ax, (xc + g["Ro"] * cs, g["rc_o"] + g["Ro"] * sn), (-sn, cs), (-cs, -sn), lip, step, gap)
+
+    handles = [
+        Line2D([], [], color="navy", lw=1.4, marker="^", ms=5,
+               label=f"ОЗГ ⌀{d_g:.1f} мм: {r['n_ozg_n']} + {r['n_ozg_vn']} = {r['n_ozg']} шт., t = {r['t_o'] * MM:.0f} мм"),
+        Line2D([], [], color="teal", lw=1.4, marker="^", ms=5,
+               label=f"ОЗС ⌀{d_s:.1f} мм: {r['n_ozs_n']} + {r['n_ozs_vn']} = {r['n_ozs']} шт., t = {r['t_ozs'] * MM:.0f} мм"),
+        Line2D([], [], color="royalblue", lw=0.9, marker="<", ms=3,
+               label=f"Пояса охлаждения: {n} шт., щель {r['h_s'] * MM:.2f} мм\n"
+                     f"({n - n_turn} на прямом участке, {n_turn} на газосборнике)"),
+    ]
+    legend_kw = dict(dict(loc="upper left", bbox_to_anchor=(0.0, 0.79), fontsize=7.5, title_fontsize=8),
+                     **(legend_kw or {}))  # по умолчанию — под основной легендой рисунка
+    ax.add_artist(ax.legend(handles=handles, title="Стенки ЖТ (п. 8.6), шт. = нар. + вн.", **legend_kw))
+
+
 def _dim_diam(ax, x_from, x_dim, rr, label, side=1):
     ax.plot([x_from, x_dim], [rr, rr], ":", color="dimgray", lw=0.7)
     ax.annotate("", xy=(x_dim, rr), xytext=(x_dim, 0), arrowprops=dict(arrowstyle="<->", color="dimgray", lw=0.8))
@@ -136,6 +221,7 @@ def plot_combustor(r, komp, tvd, duct=None):
     fig, ax = plt.subplots(figsize=(13, 8))
     _, _, _, x_out, _, _ = draw_compressor(ax, scale_komp(komp), 0.0, out_dims=False)
     c = draw_combustor(ax, r, x_out, duct=duct)
+    draw_liner_holes(ax, r, c)
     draw_axial_turbine(ax, c["xc"], tvd, 0.25 * tvd["S_rk"], "ТВД", in_dims=False, label_y=0.2 * tvd["d_sa"] / 2)
     x_right = c["x_wall"] + 8 * 8 + 15  # за размерными линиями КС
     if duct is not None:

@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-from kamera_sgoraniya.plot import draw_combustor
+from kamera_sgoraniya.plot import draw_combustor, draw_liner_holes
 
 MM = 1000.0  # перевод м -> мм для всех расчётных величин ниже
 
@@ -251,6 +251,9 @@ def main():
         label_y=ks["D_n"] * MM / 2 + 15)  # над корпусом КС, чтобы не наезжать на форсунку
 
     x_total = x_out_s
+    # отверстия и пояса охлаждения ЖТ; легенда — внизу, под СТ, левее размерных линий её выхода (мм)
+    draw_liner_holes(ax, ks, c, legend_kw=dict(loc="lower right", bbox_to_anchor=(x_out_s + 15, 3),
+                                               bbox_transform=ax.transData, fontsize=6.5, title_fontsize=7))
     # Запас под размерные линии диаметров на входе в ЦБК (слева) и на выходе из СТ (справа) —
     # те же формулы dx2, что и в draw_compressor/draw_axial_turbine
     x_left = -(0.34 * (r["D1t"] / 2) + 12)
