@@ -104,9 +104,10 @@ def point_seg(p, a, b):
 
 
 def covered(s, kept):
-    """Отрезок s целиком лежит на одном из уже взятых отрезков."""
+    """Отрезок s целиком лежит на одном из уже взятых отрезков (точное совпадение: допуск TOL здесь
+    выбрасывал бы короткие звенья дуг колена и газосборника, и дуги выходили бы пунктиром)."""
     for k in kept:
-        if all(point_seg(p, *k)[0] < TOL for p in (s[0], s[1], ((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2))):
+        if all(point_seg(p, *k)[0] < 0.01 for p in (s[0], s[1], ((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2))):
             return True
     return False
 
@@ -236,9 +237,10 @@ def draw():
 
     for (a, b) in g["main"]:
         k.line(*a, *b)
-    # пояса охлаждения, стрелки потоков и граница газосборника — тоже основной линией (тонкие плохо видны)
-    for (a, b) in g["thin"] + g["flow"] + g["dashed"]:
-        k.line(*a, *b)
+    for (a, b) in g["thin"] + g["flow"]:
+        k.line(*a, *b, KC.ksCSThin)
+    for (a, b) in g["dashed"]:
+        k.line(*a, *b, KC.ksCSDashed)
     for (a, b) in g["axis"]:
         k.line(*a, *b, KC.ksCSAxial)
     # форсунка (на графике — толстая линия 3 pt) — полоса шириной 3 мм
