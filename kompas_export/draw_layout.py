@@ -235,7 +235,7 @@ def draw():
     g = collect(ax)
     x_min, x_max = ax.get_xlim()
 
-    k = Sheet(fmt=KC.ksFormatA1, origin=(160.0, 200.0))
+    k = Sheet(fmt=KC.ksFormatA1, origin=(180.0, 200.0))
 
     for (a, b) in g["main"]:
         k.line(*a, *b)

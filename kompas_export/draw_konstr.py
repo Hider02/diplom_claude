@@ -55,9 +55,22 @@ def draw_construction(k):
         k.text((b["x0"] + b["x1"]) / 2, b["r"] + 1.2 * b["d"] + 2, b["note"], 2.5)
     for x, y, s, h in P["labels"]:
         k.text(x, y, s, h)
+    for pl in P["arrows"]:  # потоки — тонкими линиями со стрелкой на конце
+        k.polyline([p[0] for p in pl], [p[1] for p in pl], KC.ksCSThin)
+        (xa, ya), (xb, yb) = pl[-2], pl[-1]
+        L = math.hypot(xb - xa, yb - ya)
+        ux, uy = (xb - xa) / L, (yb - ya) / L
+        for s in (1, -1):
+            k.line(xb, yb, xb - 4 * ux + s * 1.3 * uy, yb - 4 * uy - s * 1.3 * ux, KC.ksCSThin)
+
+    # Радиальное входное устройство: ⌀ окна (слева от привода агрегатов) и ширина окна
+    vh = P["vh"]
+    k.dim_diam(vh["x_f_w"], vh["r_w"], vh["x_f_c"] - 64)
+    k._dim((vh["x_f_w"], vh["r_w"] + 5), (vh["x_r"], vh["r_w"] + 5),
+           ((vh["x_f_w"] + vh["x_r"]) / 2, vh["r_w"] + 22), KC.ksLinDHorizontal, value=dim_value(vh["b_w"]))
 
     # Ось двигателя по всей длине (вместе с конструкцией)
-    k.line(-135.0, 0.0, konstr.CT["x_end"] + 25, 0.0, KC.ksCSAxial)
+    k.line(-150.0, 0.0, konstr.CT["x_end"] + 25, 0.0, KC.ksCSAxial)
 
     H = KC.ksLinDHorizontal
     # Привязка опор: ГГ — от входа в колесо ЦБК и от задней кромки диска ТВД; СТ — от средней плоскости диска

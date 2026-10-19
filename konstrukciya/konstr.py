@@ -15,15 +15,17 @@ y — радиус). Компоновка — по аналогу ВК-800С (bo
 import math
 
 from konstrukciya.geometriya import tract
+from konstrukciya.vhodnoe_ustr import calc as calc_vh
 from konstrukciya.vyhodnoe_ustr import calc as calc_vu
 
 # ─── Назначенные размеры, мм ───
 GG = dict(r_sh=18.0, r_bore=11.0, r_tie=7.0, r_tie_in=4.0, x_front=-78.0, x_rear=216.0,
           brg1_dx=-57.0, brg2_dx=37.0,  # опора 1 — от входа в колесо; опора 2 — от задней грани диска ТВД
+          brg1=(40.0, 68.0, 15.0),  # опора 1 — лёгкая серия: корпус помещается в ступице радиального ВхУ
           brg_d=40.0, brg_D=80.0, brg_B=18.0, bolt_r=30.0, bolt_d=8.0, bolt_n=8)
 CT = dict(r_sh=25.0, r_bore=19.0, brg3_dx=70.0, brg4_dx=190.0,  # от средней плоскости диска СТ
           brg3=(55.0, 90.0, 18.0), brg4=(55.0, 100.0, 21.0), bolt_r=37.0, bolt_d=6.0, bolt_n=12, x_end=615.0)
-INLET = dict(x0=-115.0, r_hub=52.0, r_tip=92.0, x_bend=-35.0)
+
 
 
 def _poly_area_moments(pts):
@@ -51,24 +53,55 @@ def build():
     T = tract()
     vu = calc_vu()
     c, tv, ct, du = T["cbk"], T["tvd"], T["ct"], T["duct"]
-    P = dict(main=[], thin=[], axis=[], bearings=[], bolts=[], labels=[], dims=[], masses={})
+    P = dict(main=[], thin=[], axis=[], bearings=[], bolts=[], labels=[], dims=[], masses={}, arrows=[])
 
     def poly(pts, closed=True, key="main"):
         pts = list(pts)
         P[key].append(pts + [pts[0]] if closed else pts)
 
-    # ─── Входное устройство (схематично) и опора 1 ───
+    # ─── Радиальное входное устройство (по расчёту konstrukciya/vhodnoe_ustr.py) и опора 1 ───
+    vh = calc_vh()
+    xc_, rc_, RS, RH = vh["X_C"], vh["r_c"], vh["R_S"], vh["R_H"]
+    x_r, x_fc, x_fw, r_w = vh["x_r"], vh["x_f_c"], vh["x_f_w"], vh["r_w"]
+    arc = lambda R, a0, a1, n=16: [(xc_ + R * math.cos(math.radians(a)), rc_ + R * math.sin(math.radians(a)))
+                                   for a in [a0 + (a1 - a0) * i / n for i in range(n + 1)]]
+    # задняя (покрывная) стенка: от покрывного диска колеса поворот R_S и радиально до окна
+    poly([(c["x0"], c["r1"])] + arc(RS, -90, -180) + [(x_r, r_w)], closed=False)
+    # ступица (обтекатель носка вала): поворот R_H, передняя стенка — к окну
+    poly([(x_fw, r_w), (x_fc, rc_)] + arc(RH, 180, 270)[1:], closed=False)
+    # фланцы окна и защитная сетка (условно — тонкой сеткой)
+    poly([(x_fw, r_w), (x_fw - 14, r_w), (x_fw - 14, r_w + 5), (x_fw, r_w + 5)])
+    poly([(x_r, r_w), (x_r + 14, r_w), (x_r + 14, r_w + 5), (x_r, r_w + 5)])
+    n_g = 8
+    for i in range(n_g):
+        xa = x_fw + (x_r - x_fw) * i / n_g
+        xb = x_fw + (x_r - x_fw) * (i + 1) / n_g
+        poly([(xa, r_w - 3), (xb, r_w + 3)], closed=False, key="thin")
+        poly([(xa, r_w + 3), (xb, r_w - 3)], closed=False, key="thin")
+    # стойка в плоскости разреза (полая — внутри маслоподвод к опоре 1)
+    fw = lambda r: x_fc + (x_fw - x_fc) * (r - rc_) / (r_w - rc_)
+    r_s0, r_s1 = rc_ + 12, r_w - 18
+    poly([(fw(r_s0), r_s0), (x_r, r_s0), (x_r, r_s1 - 6), (x_r - 6, r_s1), (fw(r_s1) + 6, r_s1), (fw(r_s1), r_s1 - 6)])
+    poly([(fw((r_s0 + r_s1) / 2), (r_s0 + r_s1) / 2), (x_r, (r_s0 + r_s1) / 2)], closed=False, key="thin")
+    # корпус передней опоры в ступице ВхУ
     xb1 = c["x0"] + GG["brg1_dx"]
-    poly([(INLET["x0"], INLET["r_hub"]), (INLET["x_bend"], INLET["r_hub"]), (-12.0, c["r_vt"] + 6), (-2.0, c["r_vt"] + 1)],
-         closed=False)
-    poly([(INLET["x0"], INLET["r_tip"]), (INLET["x_bend"], INLET["r_tip"]), (c["x0"], c["r1"])], closed=False)
-    # стойка входного устройства (корпус опоры 1 — к наружному корпусу)
-    poly([(-92.0, INLET["r_hub"]), (-88.0, INLET["r_tip"]), (-72.0, INLET["r_tip"]), (-76.0, INLET["r_hub"])])
-    # корпус опоры 1
-    rD1 = GG["brg_D"] / 2
-    poly([(xb1 - 16, rD1), (xb1 + 16, rD1), (xb1 + 16, rD1 + 4), (INLET["x_bend"] + 4, INLET["r_hub"]),
-          (xb1 - 16, INLET["r_hub"])])
-    P["bearings"].append(dict(x=xb1, d=GG["brg_d"], D=GG["brg_D"], B=GG["brg_B"], kind="ball", name="Опора 1"))
+    d1, D1, B1 = GG["brg1"]
+    poly([(x_fc, rc_), (x_fc, D1 / 2 + 4), (xb1 + B1 / 2 + 2.5, D1 / 2 + 4), (xb1 + B1 / 2 + 2.5, D1 / 2),
+          (xb1 - B1 / 2 - 2.5, D1 / 2), (xb1 - B1 / 2 - 2.5, D1 / 2 + 4)], closed=False)
+    P["bearings"].append(dict(x=xb1, d=d1, D=D1, B=B1, kind="ball", name="Опора 1"))
+    # привод агрегатов перед передней стенкой — условно контуром
+    x_dr = x_fc - 52
+    poly([(x_fc, 92.0), (x_dr, 92.0), (x_dr, 4.0), (x_fc, 4.0)], closed=False)
+    # стрелки потока воздуха: в окно и на вход в колесо
+    xm_w = (x_fw + x_r) / 2
+    P["arrows"] = [[(xm_w, r_w + 34), (xm_w, r_w + 6)],
+                   [(xm_w + 2, rc_ + 8)] + [(xc_ + (RS + RH) / 2 * math.cos(math.radians(a)),
+                                              rc_ + (RS + RH) / 2 * math.sin(math.radians(a))) for a in (200, 225, 250)]
+                   + [(-6.0, rc_ - (RS + RH) / 2)]]
+    P["labels"] += [(xm_w, r_w + 40, "Входное устройство (радиальное)", 3.5),
+                    ((x_fc + x_dr) / 2, 60.0, "Привод", 3.5), ((x_fc + x_dr) / 2, 53.0, "агрегатов", 3.5),
+                    ((x_fc + x_dr) / 2, 46.0, "(условно)", 3.5)]
+    P["vh"] = vh
 
     # ─── Колесо ЦБК: тыльная стенка и задняя цапфа с фланцем ───
     S, r2 = c["S"], c["r2"]
@@ -114,6 +147,7 @@ def build():
     P["bearings"].append(dict(x=xb2, d=GG["brg_d"], D=GG["brg_D"], B=GG["brg_B"], kind="roller", name="Опора 2"))
     # корпус опоры 2: от втулки переходного канала вниз, с конической диафрагмой
     hub_duct = lambda x: du["hub"][0] + (du["hub"][1] - du["hub"][0]) * (x - du["x0"]) / (du["x1"] - du["x0"])
+    rD1 = GG["brg_D"] / 2
     poly([(xb2 - 16, rD1), (xb2 + 16, rD1), (xb2 + 16, rD1 + 4), (xb2 + 30, hub_duct(xb2 + 30)),
           (xb2 + 22, hub_duct(xb2 + 22)), (xb2 - 16, rD1 + 4)])
     # стойка в переходном канале (подвеска корпуса опоры 2)
@@ -196,7 +230,6 @@ def build():
         P["bolts"].append(dict(x0=xj - 10, x1=xj + 10, r=r0 + 11, d=6.0, note=note))
 
     P["labels"] += [
-        ((INLET["x0"] + INLET["x_bend"]) / 2, INLET["r_tip"] + 6, "Входное устройство", 3.5),
         (xb1, -12.0, "Опора 1 (шар.)", 3.5), (xb2, -12.0, "Опора 2 (рол.)", 3.5),
         (xb3, -12.0, "Опора 3 (рол.)", 3.5), (xb4, -12.0, "Опора 4 (шар.)", 3.5),
         ((xe0 + xe1) / 2, r_o1 + 52, "Выходное устройство", 5.0),

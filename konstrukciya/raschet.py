@@ -6,7 +6,8 @@
      фланцы корпуса КС (по внутреннему давлению), стяжка газогенератора;
   4. первые критические частоты роторов (жёсткие опоры, сосредоточенные массы дисков, масса вала не учтена,
      ступицы колеса/дисков, стянутые с валом, работают на изгиб заодно с ним — принято);
-  5. выходное устройство (konstrukciya/vyhodnoe_ustr.py) и итоговые удельные параметры двигателя.
+  5. радиальное входное устройство (konstrukciya/vhodnoe_ustr.py), выходное устройство
+     (konstrukciya/vyhodnoe_ustr.py) и итоговые удельные параметры двигателя.
 Принятые величины (материалы, коэффициенты) — в константах ниже.
 
 Запуск из корня проекта: python konstrukciya/raschet.py
@@ -20,6 +21,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from konstrukciya import konstr  # noqa: E402
+from konstrukciya.vhodnoe_ustr import report as report_vh  # noqa: E402
 from konstrukciya.vyhodnoe_ustr import _models, report as report_vu  # noqa: E402
 
 HP = 735.499
@@ -96,6 +98,7 @@ def main():
     N_tvd = t.L_tvd_actual * t.g_gas
     N_ct_max = max(ct.N_st, 800 * HP)
 
+    report_vh(P["vh"])
     report_vu(vu)
 
     # 1. Кручение
