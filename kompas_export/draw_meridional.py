@@ -1,4 +1,4 @@
-"""
+﻿"""
 Меридиональное сечение проточной части турбины (ТВД → переходный канал → СТ) — чертёж в КОМПАС-3D через API7.
 
 Геометрия берётся из расчётов проекта без их изменения (layout/meridional.py:_get_geometry →
@@ -7,7 +7,7 @@ turbine/gasdynamiks.py, free_turbine/gasdynamiks.py, free_turbine/perehod.py); �
 
 Запуск из корня проекта (venv проекта, нужен pywin32 и установленный КОМПАС-3D):
     python kompas_export/draw_meridional.py
-Результат: kompas_export/meridional_section.cdw и meridional_section.dxf, КОМПАС остаётся открытым.
+Результат: kompas_export/meridional_turbine.cdw и meridional_turbine.dxf, КОМПАС остаётся открытым.
 """
 import os
 import sys
@@ -26,8 +26,8 @@ from win32com.client import Dispatch, gencache  # noqa: E402
 from layout.meridional import MM, _get_geometry  # noqa: E402
 
 OUT_DIR = os.path.join(ROOT, "kompas_export")
-CDW = os.path.join(OUT_DIR, "meridional_section.cdw")
-DXF = os.path.join(OUT_DIR, "meridional_section.dxf")
+CDW = os.path.join(OUT_DIR, "meridional_turbine.cdw")
+DXF = os.path.join(OUT_DIR, "meridional_turbine.dxf")
 
 K5 = gencache.EnsureModule("{0422828C-F174-495E-AC5D-D31014DBBE87}", 0, 1, 0)
 K7 = gencache.EnsureModule("{69AC2981-37C0-4379-84FD-5DD2F3C0A520}", 0, 1, 0)
@@ -58,7 +58,7 @@ def geometry():
 
 # ─── КОМПАС ───
 class Sheet:
-    def __init__(self):
+    def __init__(self, fmt=KC.ksFormatA3, origin=(95.0, 95.0)):
         self.app = K7.IApplication(Dispatch("Kompas.Application.7")._oleobj_.QueryInterface(
             K7.IApplication.CLSID, pythoncom.IID_IDispatch))
         self.k5 = K5.KompasObject(Dispatch("Kompas.Application.5")._oleobj_.QueryInterface(
@@ -68,13 +68,14 @@ class Sheet:
         doc2d = K7.IKompasDocument2D(self.doc)
 
         ls = self.doc.LayoutSheets.Item(0)
-        ls.Format.Format = KC.ksFormatA3
+        ls.Format.Format = fmt
         ls.Format.VerticalOrientation = False
         ls.Update()
         self.layout = ls
 
         view = doc2d.ViewsAndLayersManager.Views.Add(KC.vt_Normal)
-        view.X, view.Y, view.Scale, view.Name = 95.0, 95.0, 1.0, "Меридиональное сечение"
+        view.X, view.Y = origin
+        view.Scale, view.Name = 1.0, "Меридиональное сечение"
         view.Update()
         view.Current = True
         self.dc = K7.IDrawingContainer(view)
@@ -89,9 +90,9 @@ class Sheet:
         for i in range(len(xs) - 1):
             self.line(xs[i], ys[i], xs[i + 1], ys[i + 1], style)
 
-    def text(self, x, y, s, height=3.5, angle=0.0):
+    def text(self, x, y, s, height=3.5, angle=0.0, left=False):
         t = self.dc.DrawingTexts.Add()
-        t.X, t.Y, t.Angle, t.Allocation = x, y, angle, KC.ksAlCentre
+        t.X, t.Y, t.Angle, t.Allocation = x, y, angle, KC.ksAlLeft if left else KC.ksAlCentre
         item = K7.IText(t).Add().Add()
         item.Str = s
         K7.ITextFont(item).Height = height
@@ -110,7 +111,7 @@ class Sheet:
             dt.Sign = 1  # знак ⌀
         if value is not None:
             dt.AutoNominalValue = False
-            dt.NominalValue = round(value)
+            dt.NominalValue = value
         d.Update()
         return d
 
@@ -120,7 +121,7 @@ class Sheet:
 
     def dim_diam(self, x_surf, r, x_dim):
         """Диаметр тела вращения на полусечении: от оси до поверхности, надпись ⌀2r."""
-        return self._dim((x_surf, 0.0), (x_surf, r), (x_dim, r / 2), KC.ksLinDVertical, value=2 * r, diam=True)
+        return self._dim((x_surf, 0.0), (x_surf, r), (x_dim, r / 2), KC.ksLinDVertical, value=round(2 * r), diam=True)
 
     def stamp(self, cells):
         st = self.layout.Stamp
@@ -187,7 +188,9 @@ def draw():
 
     k.stamp({1: "Проточная часть турбины.\nМеридиональное сечение", 2: "ГТД-800.ТУРБ.001", 3: "", 6: "1:1"})
 
-    k.doc.SaveAs(CDW)
+    k.doc.SaveAs(CDW)  # возвращаемое значение у КОМПАС v23 ненадёжно — проверяем файл
+    if not os.path.isfile(CDW):
+        raise RuntimeError(f"КОМПАС не сохранил {CDW} (файл открыт или занят?)")
     doc5 = k.k5.ActiveDocument2D()
     ok_dxf = doc5.ksSaveToDXF(DXF)
     print(f"Сохранено: {CDW}")
