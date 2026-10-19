@@ -236,10 +236,9 @@ def draw():
 
     for (a, b) in g["main"]:
         k.line(*a, *b)
-    for (a, b) in g["thin"] + g["flow"]:
-        k.line(*a, *b, KC.ksCSThin)
-    for (a, b) in g["dashed"]:
-        k.line(*a, *b, KC.ksCSDashed)
+    # пояса охлаждения, стрелки потоков и граница газосборника — тоже основной линией (тонкие плохо видны)
+    for (a, b) in g["thin"] + g["flow"] + g["dashed"]:
+        k.line(*a, *b)
     for (a, b) in g["axis"]:
         k.line(*a, *b, KC.ksCSAxial)
     # форсунка (на графике — толстая линия 3 pt) — полоса шириной 3 мм
