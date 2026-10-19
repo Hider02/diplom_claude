@@ -86,6 +86,11 @@ class Sheet:
         s.X1, s.Y1, s.X2, s.Y2, s.Style = x1, y1, x2, y2, style
         s.Update()
 
+    def circle(self, xc, yc, r, style=KC.ksCSNormal):
+        c = self.dc.Circles.Add()
+        c.Xc, c.Yc, c.Radius, c.Style = xc, yc, r, style
+        c.Update()
+
     def polyline(self, xs, ys, style=KC.ksCSNormal):
         for i in range(len(xs) - 1):
             self.line(xs[i], ys[i], xs[i + 1], ys[i + 1], style)

@@ -12,7 +12,8 @@
   - подписи узлов и легенда отверстий ЖТ — текстом.
 
 Запуск из корня проекта: python kompas_export/draw_layout.py
-Результат: kompas_export/meridional_section.cdw (А2, 1:1) и meridional_section.dxf, КОМПАС остаётся открытым.
+Конструкция (валы, опоры, болты, выходное устройство) дорисовывается kompas_export/draw_konstr.py.
+Результат: kompas_export/meridional_section.cdw (А1, 1:1) и meridional_section.dxf, КОМПАС остаётся открытым.
 """
 import math
 import os
@@ -34,6 +35,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from draw_meridional import KC, Sheet  # noqa: E402
+from draw_konstr import draw_construction  # noqa: E402
 
 OUT_DIR = os.path.join(ROOT, "kompas_export")
 CDW = os.path.join(OUT_DIR, "meridional_section.cdw")
@@ -233,7 +235,7 @@ def draw():
     g = collect(ax)
     x_min, x_max = ax.get_xlim()
 
-    k = Sheet(fmt=KC.ksFormatA2, origin=(85.0, 125.0))
+    k = Sheet(fmt=KC.ksFormatA1, origin=(160.0, 200.0))
 
     for (a, b) in g["main"]:
         k.line(*a, *b)
@@ -241,8 +243,7 @@ def draw():
         k.line(*a, *b, KC.ksCSThin)
     for (a, b) in g["dashed"]:
         k.line(*a, *b, KC.ksCSDashed)
-    for (a, b) in g["axis"]:
-        k.line(*a, *b, KC.ksCSAxial)
+    # ось двигателя — в draw_construction, по всей длине с валами и выходным устройством
     # форсунка (на графике — толстая линия 3 pt) — полоса шириной 3 мм
     for (a, b) in g["nozzle"]:
         d = np.subtract(b, a)
@@ -251,12 +252,16 @@ def draw():
         k.line(*pa, *pb), k.line(*ma, *mb), k.line(*pa, *ma), k.line(*pb, *mb)
 
     for x, y, s, h in texts(ax):
+        if s == "ТВД":  # на графике подпись под ступенью; здесь там ступица диска ТВД — левее, над валом
+            x, y = 108.0, 76.0
         k.text(x, y, s, h)
 
     # Размеры — в тех же местах и с теми же значениями, что на графике
     for name, a in dims:
         if name == "_dim_diam":
             x_block, x_dim, r, label = a[0], a[1], a[2], a[3]
+            if x_dim > x_block > 300:  # выход СТ: справа теперь вал СТ и выходное устройство — размеры у кромки
+                x_dim = x_block + (14.0 if r < 120 else 24.0)
             d = k._dim((x_dim, 0.0), (x_block, r), (x_dim, r / 2), KC.ksLinDVertical, value=num(label), diam=True)
         elif name == "_dim_width":
             x0, x1, y0, y1, y_dim, label = a[:6]
@@ -266,11 +271,13 @@ def draw():
             k._dim((x0, y), (x1, y), ((x0 + x1) / 2, y), KC.ksLinDHorizontal, value=dim_value(x1 - x0))
 
     # Легенда отверстий ЖТ — текстом под схемой
-    y = -32.0
+    y = -72.0
     for i, s in enumerate(legend_lines(ax)):
         k.text(x_min + 5, y - 6 * i, re.sub(r"(\d)\.(\d)", r"\1,\2", s.replace("⌀", "диам. ")), 3.5, left=True)
 
-    k.stamp({1: "Двигатель ГТД 800 л.с.\nПродольный разрез проточной части", 2: "ГТД-800.00.001", 6: "1:1"})
+    draw_construction(k)
+
+    k.stamp({1: "Двигатель ГТД 800 л.с.\nПродольный разрез (схема)", 2: "ГТД-800.00.001", 6: "1:1"})
 
     k.doc.SaveAs(CDW)  # возвращаемое значение у КОМПАС v23 ненадёжно — проверяем файл
     if not os.path.isfile(CDW):
